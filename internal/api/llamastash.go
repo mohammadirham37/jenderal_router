@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -237,12 +238,47 @@ func llamastashAPIKey(bin string) string {
 // hanya ada pada baris yang launch-nya hidup (kontrak list --json v0.6.1);
 // state-nya salah satu dari loading/ready/error/stopped/external.
 type llamastashModelRow struct {
-	Name string `json:"name"`
-	Repo string `json:"repo"`
+	Name         string `json:"name"`
+	DisplayLabel string `json:"display_label"`
+	Repo         string `json:"repo"`
 	Status *struct {
 		State string `json:"state"`
 		Port  int    `json:"port"`
 	} `json:"status"`
+	Launches []struct {
+		State string `json:"state"`
+	} `json:"launches"`
+}
+
+// running melaporkan (loaded, state): status utama, lalu fallback ke
+// launches[] — model bisa berjalan ganda; cukup satu launch hidup.
+func (r llamastashModelRow) running() (bool, string) {
+	st := ""
+	if r.Status != nil {
+		st = strings.ToLower(strings.TrimSpace(r.Status.State))
+	}
+	alive := func(s string) bool {
+		return s != "" && s != "error" && s != "stopped"
+	}
+	if !alive(st) {
+		for _, l := range r.Launches {
+			if s := strings.ToLower(strings.TrimSpace(l.State)); alive(s) {
+				st = s
+				break
+			}
+		}
+	}
+	if !alive(st) {
+		return false, ""
+	}
+	return true, st
+}
+
+func (r *llamastashModelRow) displayName() string {
+	if r.Name != "" {
+		return r.Name
+	}
+	return r.DisplayLabel
 }
 
 func llamastashCLIModelRows() ([]llamastashModelRow, error) {
@@ -255,9 +291,46 @@ func llamastashCLIModelRows() ([]llamastashModelRow, error) {
 	if err != nil {
 		return nil, err
 	}
+	rows, err := parseLlamastashListJSON(out)
+	if err != nil {
+		return nil, fmt.Errorf("output list --json tidak dikenali: %w", err)
+	}
+	return rows, nil
+}
+
+// parseLlamastashListJSON menerima beberapa kemungkinan bentuk output:
+// array polos [{name,status},…] atau objek berbungkus {models|items|rows:[…]}.
+func parseLlamastashListJSON(out []byte) ([]llamastashModelRow, error) {
+	raw := bytes.TrimSpace(out)
+	if len(raw) == 0 {
+		return nil, nil
+	}
 	var rows []llamastashModelRow
-	if err := jsonUnmarshalBytes(out, &rows); err != nil {
-		return nil, err
+	if raw[0] == '[' {
+		if err := json.Unmarshal(raw, &rows); err != nil {
+			return nil, err
+		}
+	} else {
+		var wrap struct {
+			Models []llamastashModelRow `json:"models"`
+			Items  []llamastashModelRow `json:"items"`
+			Rows   []llamastashModelRow `json:"rows"`
+		}
+		if err := json.Unmarshal(raw, &wrap); err != nil {
+			return nil, err
+		}
+		rows = wrap.Models
+		if len(rows) == 0 {
+			rows = wrap.Items
+		}
+		if len(rows) == 0 {
+			rows = wrap.Rows
+		}
+	}
+	for i := range rows {
+		if rows[i].Name == "" {
+			rows[i].Name = rows[i].DisplayLabel
+		}
 	}
 	return rows, nil
 }

@@ -281,6 +281,9 @@
 				{#if status.models_discovered !== undefined}
 					<div class="muted small">model: {status.models_loaded} dimuat / {status.models_discovered} ditemukan</div>
 				{/if}
+				{#if status.cli_note}
+					<p class="muted small" style="margin-top:6px">ℹ {status.cli_note}</p>
+				{/if}
 			</div>
 		</div>
 

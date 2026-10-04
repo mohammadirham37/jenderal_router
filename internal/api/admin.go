@@ -1000,6 +1000,11 @@ func (a *App) handleLocalStatus(w http.ResponseWriter, r *http.Request) {
 	cliOK := false
 	if rows, err := llamastashCLIModelRows(); err == nil {
 		cliRows, cliOK = rows, true
+		if len(rows) == 0 {
+			out["cli_note"] = "list --json kosong — bila model seharusnya terlihat, cek `llamastash list` di host"
+		}
+	} else if err != nil {
+		out["cli_note"] = "list --json gagal dibaca: " + err.Error()
 	}
 	out["cli_available"] = cliOK
 
