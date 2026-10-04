@@ -175,6 +175,13 @@ bawaan (minimal 12 karakter, campuran huruf besar/kecil/angka).
 Setelah masuk: tambah provider (menu **Provider → Dari Template**), buat API
 key (menu **User & Peran**), lalu pakai di klien.
 
+### Akses dari PC lain di jaringan lokal (LAN)?
+
+Secara default aplikasi hanya listen di `127.0.0.1` (keamanan). Untuk akses
+LAN, pasang Caddy dengan site address `:80` yang mem-proxy ke
+`127.0.0.1:20130`, atau publikasikan port aplikasi ke subnet LAN —
+panduan lengkap: [docs/OPERATIONS.md §8](docs/OPERATIONS.md).
+
 ### Verifikasi instalasi
 
 ```bash

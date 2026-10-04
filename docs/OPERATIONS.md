@@ -135,6 +135,35 @@ Perhatian: fallback streaming hanya terjadi **sebelum token pertama**
 3. `systemctl restart jenderalrouter`. Migrasi skema berjalan otomatis saat
    start (tabel `schema_migrations`).
 
+## 8. Akses dari jaringan lokal (LAN)
+
+Secara default aplikasi hanya listen di `127.0.0.1:20130` (NFR: hanya proxy
+yang menghadap jaringan). Untuk akses dari PC lain di LAN, pilih salah satu:
+
+**Opsi A — publikasikan port aplikasi (cepat):**
+```bash
+sudo sed -i 's|^JR_ADDR=.*|JR_ADDR=0.0.0.0:20130|' /etc/default/jenderalrouter
+sudo systemctl restart jenderalrouter
+sudo ufw allow from 172.26.0.0/16 to any port 20130 proto tcp  # sesuaikan subnet
+```
+Akses: `http://<ip-server>:20130`. Perhatian: HTTP tanpa enkripsi di LAN.
+
+**Opsi B — Caddy di port 80 (disarankan, sesuai arsitektur PRD):**
+```bash
+sudo apt -y install caddy
+# /etc/caddy/Caddyfile:
+#   :80 {
+#       reverse_proxy 127.0.0.1:20130 { flush_interval -1 }
+#   }
+sudo systemctl reload caddy
+```
+Akses: `http://<ip-server>/` — aplikasi tetap loopback, port 20130 tertutup
+dari luar. Saat sudah punya domain, ganti `:80` menjadi domain agar HTTPS
+otomatis aktif.
+
+Login dari PC lain tetap normal — cookie sesi tidak beratribut `Secure`
+selama `JR_PUBLIC_URL` tidak di-set https.
+
 ## 8. Batas MVP yang perlu diketahui
 
 - SQLite tunggal (WAL) — cukup untuk ratusan request/detik pada VPS 2 vCPU;
