@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Settings, Save, Database, Rocket, RefreshCw, ScrollText, ShieldCheck } from '@lucide/svelte';
+	import { Settings, Save, Database, Rocket, RefreshCw, ScrollText, Copy } from '@lucide/svelte';
 	import { api } from '$lib/api';
 	import { t, toast } from '$lib/stores.svelte';
 
@@ -13,6 +13,21 @@
 	}
 
 	// ---- backup ----
+	function stagePath() {
+		const base = upd?.repo_dir ? upd.repo_dir.replace('/src', '') : '/var/lib/jenderalrouter';
+		return base + '/updates/jenderalrouter.new';
+	}
+	function copyStageCommands() {
+		const p = stagePath();
+		const cmd = [
+			'sudo systemctl stop jenderalrouter',
+			'sudo install -m 0755 ' + p + ' /usr/local/bin/jenderalrouter',
+			'sudo rm -f ' + p,
+			'sudo systemctl start jenderalrouter'
+		].join('\n');
+		navigator.clipboard.writeText(cmd).then(() => toast('perintah disalin ✓', 'ok')).catch(() => {});
+	}
+
 	async function backup() {
 		try { await api.post('/api/admin/system/backup'); toast(t('save') + ' ✓', 'ok'); }
 		catch (e: any) { toast(e.message, 'err'); }
@@ -23,6 +38,24 @@
 	let updLoading = $state(false);
 	let updating = $state(false);
 	let updLog = $state('');
+	let job = $state<any>(null);
+
+	async function pollJob() {
+		for (;;) {
+			try { job = await api.get('/api/admin/system/update/status'); } catch { /* */ }
+			const j = job?.job;
+			if (!j?.running) break;
+			await new Promise((r) => setTimeout(r, 3000));
+		}
+		if (job?.job?.done) {
+			const j = job.job;
+			if (j.ok) toast(j.restarted ? 'Pembaruan terpasang & service di-restart ✓' : 'Build selesai — binary distage', 'ok');
+			else toast('Pembaruan gagal: ' + (j.error || 'lihat log'), 'err');
+		}
+		updLoading = true;
+		try { upd = await api.get('/api/admin/system/update/status?fetch=auto'); } catch { /* */ }
+		updLoading = false;
+	}
 
 	async function loadStatus(fetchNew: boolean) {
 		updLoading = true;
@@ -30,32 +63,30 @@
 		catch (e: any) { toast(e.message, 'err'); }
 		updLoading = false;
 	}
-	$effect(() => { loadStatus(true); (async () => {
-		try { const s = await api.get('/api/admin/settings'); tgToken = s.settings.notification_telegram_token || ''; tgChat = s.settings.notification_chat_id || ''; } catch { /* */ }
-	})(); });
+	$effect(() => {
+		loadStatus(true);
+		// lanjutkan polling bila job sedang berjalan (mis. halaman dimuat ulang)
+		api.get('/api/admin/system/update/status').then((st) => {
+			if (st?.job?.running) { job = st; pollJob(); }
+		}).catch(() => {});
+		(async () => {
+			try { const s = await api.get('/api/admin/settings'); tgToken = s.settings.notification_telegram_token || ''; tgChat = s.settings.notification_chat_id || ''; } catch { /* */ }
+		})();
+	});
 
 	async function update() {
-		if (!confirm('Perbarui aplikasi sekarang?\nBuild bisa 2–5 menit. Bila helper sudo aktif, service akan di-restart otomatis (koneksi sempat terputus).')) return;
+		if (!confirm('Perbarui aplikasi sekarang?\n\nBuild bisa 2–5 menit — log progres tampil live. Bila helper sudo aktif, service akan di-restart otomatis; jika tidak, binary distage dan perintah pemasangan ditampilkan.')) return;
 		updating = true;
-		updLog = '⏳ fetch + build… (jangan tutup halaman ini)';
+		updLog = '';
 		try {
-			const res = await api.post('/api/admin/system/update', {});
-			updLog = res.log || '';
-			if (res.error) toast(res.error, 'err');
-			else if (res.staged) toast('Binary distage — lihat perintah pemasangan di log', 'ok');
-		} catch {
-			updLog += '\n(koneksi terputus — kemungkinan service sedang restart, memeriksa status…)';
-		}
-		// poll hingga selesai
-		for (let i = 0; i < 12; i++) {
-			await new Promise((r) => setTimeout(r, 3000));
-			try {
-				const st = await api.get('/api/admin/system/update/status');
-				if (!st.busy) { updLog += `\nversi sekarang: ${st.version}`; upd = st; break; }
-			} catch { /* tunggu */ }
+			await api.post('/api/admin/system/update', {});
+			job = { job: { running: true, phase: 'menyiapkan', log: [] } };
+			updLog = '⏳ dimulai…';
+			await pollJob();
+		} catch (e: any) {
+			toast(e.message, 'err');
 		}
 		updating = false;
-		toast('Proses pembaruan selesai', 'ok');
 	}
 
 	// ---- audit ----
@@ -149,9 +180,30 @@
 					{#if updating}<span class="spinner"></span>{:else}<Rocket size={15} />{/if}
 					{t('update_now')}
 				</button>
+				{#if upd.busy && upd.job}
+					<span class="badge info"><span class="dot pulse"></span>{upd.job.phase || 'berjalan'}</span>
+				{/if}
 			{/if}
 		</div>
-		{#if updLog}<pre class="logbox" style="margin-top:10px">{updLog}</pre>{/if}
+		{#if upd.staged_binary}
+			<div style="margin-top:12px;padding:12px;border-radius:10px;background:color-mix(in srgb, var(--warn) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn) 40%, transparent)">
+				<div class="small" style="font-weight:700;margin-bottom:6px">⚠ Binary baru sudah dibangun tetapi BELUM AKTIF</div>
+				<p class="muted small" style="margin:0 0 8px">
+					Pembaruan memakai mirror internal — folder clone lain (mis. ~/jenderal_router) tidak diubah.
+					Pasang binary hasil stage lewat SSH:
+				</p>
+				<pre class="logbox" style="margin-bottom:8px">sudo systemctl stop jenderalrouter
+sudo install -m 0755 {upd.repo_dir ? upd.repo_dir.replace('/src','') : '/var/lib/jenderalrouter'}/updates/jenderalrouter.new /usr/local/bin/jenderalrouter
+sudo rm -f {upd.repo_dir ? upd.repo_dir.replace('/src','') : '/var/lib/jenderalrouter'}/updates/jenderalrouter.new
+sudo systemctl start jenderalrouter</pre>
+				<button class="btn sm" onclick={copyStageCommands}>
+					<Copy size={13} /> Salin perintah
+				</button>
+			</div>
+		{/if}
+		{#if (job?.job?.log?.length || updLog)}
+			<pre class="logbox" style="margin-top:10px">{job?.job ? job.job.log.join('\n') : updLog}</pre>
+		{/if}
 	{/if}
 </div>
 

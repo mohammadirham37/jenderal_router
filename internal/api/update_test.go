@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -109,18 +108,17 @@ func TestEnsureMirrorClones(t *testing.T) {
 	t.Setenv("JR_REPO_DIR", filepath.Join(base, "mirror"))
 	t.Setenv("JR_DATA_DIR", filepath.Join(base, "data"))
 
-	var log strings.Builder
 	mctx, mcancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer mcancel()
-	dir, err := ensureMirror(mctx, &log)
+	dir, err := ensureMirror(mctx, &updateJob{})
 	if err != nil {
-		t.Fatalf("ensureMirror: %v\nlog: %s", err, log.String())
+		t.Fatalf("ensureMirror: %v", err)
 	}
 	if !isRepo(dir) || dir != filepath.Join(base, "mirror") {
 		t.Fatalf("dir = %s", dir)
 	}
 	// panggil kedua kali → pakai yang sudah ada
-	dir2, err := ensureMirror(context.Background(), &log)
+	dir2, err := ensureMirror(context.Background(), &updateJob{})
 	if err != nil || dir2 != dir {
 		t.Fatalf("mirror kedua = %s, %v", dir2, err)
 	}
