@@ -36,6 +36,15 @@
 		api.get('/api/admin/local/install/status').then((j) => {
 			if (j?.running) { job = j; pollJob(); }
 		}).catch(() => {});
+		// lanjutkan polling unduhan model yang mungkin masih berjalan di latar
+		api.get('/api/admin/local/models/download/status').then((j) => {
+			if (j?.running) { dlJob = j; pollDlJob(); }
+		}).catch(() => {});
+	});
+
+	// muat rekomendasi begitu status terpasang diketahui
+	$effect(() => {
+		if (status?.installed && !status?.in_container && recs.length === 0 && !recsLoading) loadRecs();
 	});
 
 	async function install() {
@@ -58,6 +67,54 @@
 			reload();
 		} catch (e: any) { toast(e.message, 'err'); }
 		busyModel = '';
+	}
+
+	// ---- unduh model (rekomendasi hardware-aware + repo HF kustom) ----
+	let recs = $state<any[]>([]);
+	let hw = $state<any>(null);
+	let recsLoading = $state(false);
+	let dlJob = $state<any>(null);
+	let dlStarting = $state(false);
+	let customRepo = $state('');
+
+	function fmtB(b: number): string {
+		if (b >= 1e9) return (b / 1e9).toFixed(b >= 1e10 ? 0 : 1) + 'B';
+		if (b >= 1e6) return Math.round(b / 1e6) + 'M';
+		return String(b);
+	}
+
+	async function loadRecs() {
+		recsLoading = true;
+		try {
+			const r = await api.get('/api/admin/local/models/recommendations');
+			recs = r.recommendations || [];
+			hw = r.hardware || null;
+		} catch { recs = []; hw = null; }
+		recsLoading = false;
+	}
+
+	async function pollDlJob() {
+		for (;;) {
+			try { dlJob = await api.get('/api/admin/local/models/download/status'); } catch { /* */ }
+			if (!dlJob?.running) break;
+			await new Promise((r) => setTimeout(r, 2500));
+		}
+		if (dlJob?.done) {
+			toast(dlJob.ok ? 'Unduhan model selesai ✓ — sinkronkan model di atas bila perlu' : 'Unduhan gagal: ' + (dlJob.err || 'lihat log'), dlJob.ok ? 'ok' : 'err');
+			reload();
+		}
+	}
+
+	async function downloadModel(repo: string, file: string) {
+		if (!repo) { toast('isi repo dulu (owner/repo)', 'err'); return; }
+		dlStarting = true;
+		try {
+			await api.post('/api/admin/local/models/download', { repo, file });
+			customRepo = '';
+			dlJob = { running: true, phase: 'menyiapkan unduhan', log: [] };
+			pollDlJob();
+		} catch (e: any) { toast(e.message, 'err'); }
+		dlStarting = false;
 	}
 </script>
 
@@ -117,6 +174,75 @@
 			</p>
 		{/if}
 	</div>
+
+	<!-- unduh model (rekomendasi hardware-aware) -->
+	{#if !status.in_container && status.installed}
+		<div class="card" style="margin-bottom:14px">
+			<h2><Download size={15} /> Unduh Model</h2>
+			{#if dlJob?.running}
+				<div class="kv" style="margin:6px 0 10px">
+					<span class="spinner dark"></span>
+					<span class="badge info"><span class="dot pulse"></span>{dlJob.phase || 'mengunduh'}</span>
+					<span class="muted small">aman meninggalkan halaman ini — unduhan lanjut di latar</span>
+				</div>
+				<pre class="logbox">{dlJob.log?.join('\n') || ''}</pre>
+			{:else}
+				{#if recsLoading}
+					<p class="muted small"><span class="spinner dark"></span> memuat rekomendasi untuk hardware ini…</p>
+				{:else if recs.length}
+					{#if hw}
+						<p class="muted small" style="margin:0 0 10px">
+							Hardware: {hw.gpu_backend} · RAM {hw.ram_total_gb} GB — rekomendasi terurut dari yang terbaik.
+						</p>
+					{/if}
+					<div class="table-wrap">
+						<table>
+							<thead><tr><th>Model</th><th>Ukuran</th><th></th></tr></thead>
+							<tbody>
+								{#each recs as m (m.id)}
+									<tr>
+										<td>
+											<div class="small" style="font-weight:700">{m.repo}</div>
+											<div class="muted small mono">{m.file}</div>
+											<div class="muted small">
+												{#if m.moe && m.params_active_b}MoE {fmtB(m.params_active_b)} aktif · {/if}
+												{m.justification}
+											</div>
+										</td>
+										<td class="small">
+											{m.weights_gb} GB
+											{#if m.peak_gb}<div class="muted small">peak ±{m.peak_gb} GB</div>{/if}
+											{#if m.bench}<div class="muted small">skor {m.bench}</div>{/if}
+										</td>
+										<td>
+											<button class="btn sm" disabled={dlStarting || !!dlJob?.running}
+												onclick={() => downloadModel(m.repo, m.file)}>
+												{#if dlStarting}<span class="spinner"></span>{:else}<Download size={12} />{/if}
+												Unduh
+											</button>
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{:else}
+					<p class="muted small">Rekomendasi tidak tersedia (CLI llamastash tidak ditemukan atau gagal dijalankan).</p>
+				{/if}
+				<div class="row" style="margin-top:10px">
+					<input style="max-width:360px" bind:value={customRepo}
+						placeholder="repo HF kustom: owner/repo[:file.gguf]" />
+					<button class="btn ghost sm" disabled={dlStarting || !!dlJob?.running || !customRepo}
+						onclick={() => downloadModel(customRepo, '')}>
+						<Download size={13} /> Unduh
+					</button>
+				</div>
+			{/if}
+			{#if dlJob?.done && !dlJob.ok}
+				<p class="small" style="color:var(--err);margin-top:8px">{dlJob.err}</p>
+			{/if}
+		</div>
+	{/if}
 
 	<!-- status daemon -->
 	<div class="card">

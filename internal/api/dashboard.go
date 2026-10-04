@@ -109,6 +109,9 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("POST /api/admin/system/update/apply", a.requireSession(a.handleSystemUpdateApply, store.RoleSuperAdmin, true))
 	a.mux.HandleFunc("POST /api/admin/local/models/{name}/start", a.requireSession(a.handleLocalModelStart, store.RoleAdmin, true))
 	a.mux.HandleFunc("POST /api/admin/local/models/{name}/stop", a.requireSession(a.handleLocalModelStop, store.RoleAdmin, true))
+	a.mux.HandleFunc("GET /api/admin/local/models/recommendations", a.requireSession(a.handleLocalModelRecommendations, store.RoleAdmin, false))
+	a.mux.HandleFunc("POST /api/admin/local/models/download", a.requireSession(a.handleLocalModelDownload, store.RoleAdmin, true))
+	a.mux.HandleFunc("GET /api/admin/local/models/download/status", a.requireSession(a.handleLocalModelDownloadStatus, store.RoleAdmin, false))
 
 	// playground: riwayat percakapan (FR-7.2)
 	a.mux.HandleFunc("GET /api/me/conversations", a.requireSession(a.handleListConversations, store.RoleMember, false))
