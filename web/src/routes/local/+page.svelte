@@ -240,6 +240,9 @@
 			{/if}
 			{#if dlJob?.done && !dlJob.ok}
 				<p class="small" style="color:var(--err);margin-top:8px">{dlJob.err}</p>
+				{#if dlJob.log?.length}
+					<pre class="logbox" style="margin-top:8px">{dlJob.log.join('\n')}</pre>
+				{/if}
 			{/if}
 		</div>
 	{/if}

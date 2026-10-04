@@ -27,7 +27,9 @@ func (a *App) handleLocalModelRecommendations(w http.ResponseWriter, r *http.Req
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "recommend", "--json").Output()
+	// --model none = dry-run resmi: TANPA mengunduh model. `recommend`
+	// bawaannya langsung mengunduh pick teratas (diverifikasi thd v0.6.1)!
+	out, err := exec.CommandContext(ctx, bin, "recommend", "--model", "none", "--json").Output()
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": "recommend gagal: " + err.Error()})
 		return

@@ -106,8 +106,15 @@ Perhatian: fallback streaming hanya terjadi **sebelum token pertama**
 - Tombol **Perbarui sekarang** (super_admin): clone/mirror repo ke
   `<data>/src` (milik user service), reset ke `origin/main`, build binary
   baru, smoke test, lalu:
-  - **helper sudo aktif** (dipasang `install-ubuntu.sh binary`, jawab Y):
-    binary dipasang + service di-restart otomatis.
+  - **helper aktif** (dipasang `install-ubuntu.sh binary`, jawab Y, atau
+    `sudo /usr/local/bin/jenderalrouter install-update-helper`):
+    binary dipasang + service di-restart otomatis. Mekanisme utamanya
+    **tanpa sudo**: service hanya menulis
+    `<data>/updates/apply.request`, unit `jenderalrouter-apply.path`
+    (root) memicu `jenderalrouter-apply.service` yang menjalankan
+    `apply-update.sh` — penting karena unit service memakai
+    `NoNewPrivileges=true` (sudo mustahil dari dalam service); sudoers
+    NOPASSWD tetap dipasang sebagai fallback host non-systemd.
   - tanpa helper: binary distage di `<data>/updates/jenderalrouter.new`
     dan dashboard menampilkan satu perintah pemasangan helper:
     `sudo /usr/local/bin/jenderalrouter install-update-helper`

@@ -36,8 +36,10 @@ func inContainer() bool {
 	return err == nil
 }
 
-// applyUpdateScript lokasi helper root (dipasang install-ubuntu.sh).
-const applyUpdateScript = "/usr/local/lib/jenderalrouter/apply-update.sh"
+// applyUpdateScript lokasi helper root (dipasang install-ubuntu.sh atau
+// `install-update-helper`); lokasinya juga didefinisikan sebagai
+// helperScriptPath di updatehelper.go — satu sumber: pakai var itu.
+var applyUpdateScript = helperScriptPath
 
 // stageDir tempat binary hasil build distage (milik user service).
 func stageDir() string {
@@ -333,7 +335,15 @@ func (a *App) updateStatusView(r *http.Request) map[string]any {
 	goOK := goOKbool == nil
 	st["git_available"] = gitOK
 	st["go_available"] = goOK || fileExists("/usr/local/go/bin/go")
-	st["sudo_apply_available"] = sudoApplyAvailable()
+	st["sudo_apply_available"] = applyAvailable()
+	switch {
+	case applyPathUnitInstalled():
+		st["apply_mode"] = "path_unit"
+	case sudoApplyAvailable():
+		st["apply_mode"] = "sudo"
+	default:
+		st["apply_mode"] = ""
+	}
 	st["staged_binary"] = fileExists(filepath.Join(stageDir(), "jenderalrouter.new"))
 	if lu := readLastUpdate(); lu.Time != "" {
 		st["last_update"] = lu
@@ -518,7 +528,31 @@ func (a *App) handleSystemUpdate(w http.ResponseWriter, r *http.Request) {
 			job.appendLog("smoke: %s", strings.TrimSpace(string(out)))
 		}
 
-		// 5) pasang + restart bila helper sudo tersedia; else instruksikan manual
+		// 5) pasang + restart bila mekanisme apply tersedia; else instruksikan manual
+		markApply := func() {
+			markFetched()
+			job.mu.Lock()
+			job.running, job.done, job.ok = false, true, true
+			job.restarted, job.commits = true, behind
+			job.finished = time.Now()
+			job.mu.Unlock()
+			a.st.Audit(actorID, "system.update", "system", map[string]string{"version": fromVersion},
+				map[string]any{"commits": behind, "restarted": true})
+		}
+		if applyPathUnitInstalled() {
+			_ = writeLastUpdate(lastUpdateInfo{
+				Time: time.Now().UTC().Format(time.RFC3339), From: fromVersion, To: newHead, Commits: behind,
+			})
+			// tanpa sudo: tulis file permintaan — unit jenderalrouter-apply.path
+			// (root) yang menjalankan pemasangan; service lalu di-restart
+			job.setPhase("memasang & me-restart service (unit path systemd)")
+			if err := os.WriteFile(applyRequestPath(), []byte(time.Now().UTC().Format(time.RFC3339Nano)), 0o644); err != nil {
+				fail("gagal menulis permintaan apply: " + err.Error())
+				return
+			}
+			markApply()
+			return
+		}
 		if sudoApplyAvailable() {
 			_ = writeLastUpdate(lastUpdateInfo{
 				Time: time.Now().UTC().Format(time.RFC3339), From: fromVersion, To: newHead, Commits: behind,
@@ -530,14 +564,7 @@ func (a *App) handleSystemUpdate(w http.ResponseWriter, r *http.Request) {
 				fail("apply gagal: " + err.Error())
 				return
 			}
-			markFetched()
-			job.mu.Lock()
-			job.running, job.done, job.ok = false, true, true
-			job.restarted, job.commits = true, behind
-			job.finished = time.Now()
-			job.mu.Unlock()
-			a.st.Audit(actorID, "system.update", "system", map[string]string{"version": fromVersion},
-				map[string]any{"commits": behind, "restarted": true})
+			markApply()
 			return
 		}
 
