@@ -69,6 +69,7 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("POST /api/admin/providers/{id}/test", a.requireSession(a.handleTestProvider, store.RoleAdmin, true))
 	a.mux.HandleFunc("POST /api/admin/providers/{id}/sync-models", a.requireSession(a.handleSyncModels, store.RoleAdmin, true))
 	a.mux.HandleFunc("POST /api/admin/providers/{id}/credentials", a.requireSession(a.handleAddCredential, store.RoleAdmin, true))
+	a.mux.HandleFunc("GET /api/admin/providers/{id}/credentials/suggest", a.requireSession(a.handleCredentialSuggest, store.RoleAdmin, false))
 	a.mux.HandleFunc("DELETE /api/admin/credentials/{id}", a.requireSession(a.handleDeleteCredential, store.RoleAdmin, true))
 
 	a.mux.HandleFunc("GET /api/admin/models", a.requireSession(a.handleListModels, store.RoleViewer, false))

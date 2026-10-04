@@ -1,7 +1,9 @@
 package api
 
 import (
+	"crypto/rand"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -419,6 +421,47 @@ func llamastashCLIModels() ([]string, error) {
 }
 
 // ---- Credential ----
+
+// handleCredentialSuggest GET /api/admin/providers/{id}/credentials/suggest —
+// usul nilai API key untuk modal "Tambah API key": LlamaStash → bearer key
+// daemon via CLI `llamastash api-key`; daemon keyless (loopback) → nilai
+// acak yang diabaikan proxy. Provider vendor lain menolak — key-nya harus
+// diterbitkan vendor.
+func (a *App) handleCredentialSuggest(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	p, err := a.st.GetProvider(id)
+	if err != nil {
+		writeJSON(w, 404, map[string]string{"error": "provider tidak ditemukan"})
+		return
+	}
+	if p.Type != store.ProviderLlamaStash {
+		writeJSON(w, 400, map[string]string{"error": "key provider ini diterbitkan vendor-nya — tempel manual dari dashboard vendor"})
+		return
+	}
+	bin := findLlamastashBin()
+	if bin == "" {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "binary llamastash tidak ditemukan — isi key secara manual"})
+		return
+	}
+	if key := llamastashAPIKey(bin); key != "" {
+		writeJSON(w, 200, map[string]string{"api_key": key, "source": "cli"})
+		return
+	}
+	writeJSON(w, 200, map[string]string{"api_key": generateLocalKey(), "source": "generated"})
+}
+
+// generateLocalKey nilai acak untuk daemon LlamaStash keyless — proxy lokal
+// tidak memvalidasinya (stub keyless "llamastash" diabaikan).
+func generateLocalKey() string {
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("llama-%d", time.Now().UnixNano())
+	}
+	return "llama-" + hex.EncodeToString(b)
+}
 
 func (a *App) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)

@@ -93,11 +93,32 @@
 	// ---- modal tambah kredensial ----
 	let credFor = $state<Provider | null>(null);
 	let credLabel = $state(''); let credKey = $state('');
+	let credSource = $state(''); let credFetching = $state(false);
+
+	function closeCred() {
+		credFor = null; credLabel = ''; credKey = ''; credSource = ''; credFetching = false;
+	}
+
+	// LlamaStash: key diambil dari daemon via CLI; daemon keyless → dibuat acak
+	async function fetchSuggestedKey(p: Provider) {
+		if (!p || p.type !== 'llamastash') return;
+		credFetching = true;
+		try {
+			const r = await api.get(`/api/admin/providers/${p.id}/credentials/suggest`);
+			credKey = r.api_key;
+			credSource = r.source;
+		} catch {
+			credSource = ''; // gagal → biarkan input manual
+		} finally {
+			credFetching = false;
+		}
+	}
+
 	async function addCred() {
 		if (!credFor) return;
 		try {
 			await api.post(`/api/admin/providers/${credFor.id}/credentials`, { label: credLabel, api_key: credKey, weight: 1 });
-			credFor = null; credLabel = ''; credKey = '';
+			closeCred();
 			toast(t('save') + ' ✓', 'ok');
 			reload();
 		} catch (e: any) { toast(e.message, 'err'); }
@@ -153,7 +174,7 @@
 				{:else}
 					<span class="muted small">—</span>
 				{/each}
-				<button class="btn sm" style="margin-top:8px" onclick={() => { credFor = p; credLabel = ''; credKey = ''; }}>
+				<button class="btn sm" style="margin-top:8px" onclick={() => { credFor = p; credLabel = ''; credKey = ''; credSource = ''; if (p.type === 'llamastash') fetchSuggestedKey(p); }}>
 					<KeyRound size={13} /> {t('add_key')}
 				</button>
 			</div>
@@ -204,14 +225,30 @@
 {/if}
 
 {#if credFor}
-	<Modal title={`${t('add_key')} — ${credFor.name}`} onclose={() => (credFor = null)}>
+	<Modal title={`${t('add_key')} — ${credFor.name}`} onclose={closeCred}>
 		<label>{t('credentials')}: label</label>
 		<input bind:value={credLabel} placeholder="kunci utama" />
 		<label>{t('api_key')}</label>
 		<input bind:value={credKey} placeholder="sk-…" />
+		{#if credFor.type === 'llamastash'}
+			<div class="row" style="margin-top:7px">
+				{#if credFetching}
+					<span class="muted small"><span class="spinner dark"></span> mengambil key dari daemon…</span>
+				{:else if credSource === 'cli'}
+					<span class="badge ok"><span class="dot"></span>key daemon via CLI</span>
+				{:else if credSource === 'generated'}
+					<span class="badge info">key acak — daemon lokal keyless</span>
+				{:else}
+					<span class="muted small">isi manual</span>
+				{/if}
+				<button type="button" class="btn ghost sm" onclick={() => fetchSuggestedKey(credFor)} disabled={credFetching}>
+					<RefreshCw size={13} /> Generate
+				</button>
+			</div>
+		{/if}
 		<div class="modal-actions">
-			<button class="btn ghost" onclick={() => (credFor = null)}>{t('cancel')}</button>
-			<button class="btn" onclick={addCred}><KeyRound size={15} /> {t('save')}</button>
+			<button class="btn ghost" onclick={closeCred}>{t('cancel')}</button>
+			<button class="btn" onclick={addCred} disabled={!credKey}><KeyRound size={15} /> {t('save')}</button>
 		</div>
 	</Modal>
 {/if}
