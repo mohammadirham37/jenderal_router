@@ -233,6 +233,35 @@ func llamastashAPIKey(bin string) string {
 	return key
 }
 
+// llamastashModelRow satu baris `llamastash list --json`. Objek `status`
+// hanya ada pada baris yang launch-nya hidup (kontrak list --json v0.6.1);
+// state-nya salah satu dari loading/ready/error/stopped/external.
+type llamastashModelRow struct {
+	Name string `json:"name"`
+	Repo string `json:"repo"`
+	Status *struct {
+		State string `json:"state"`
+		Port  int    `json:"port"`
+	} `json:"status"`
+}
+
+func llamastashCLIModelRows() ([]llamastashModelRow, error) {
+	path := findLlamastashBin()
+	if path == "" {
+		return nil, fmt.Errorf("binary llamastash tidak ditemukan")
+	}
+	ctx := contextWithTimeoutCLI(10 * time.Second)
+	out, err := exec.CommandContext(ctx, path, "list", "--json").Output()
+	if err != nil {
+		return nil, err
+	}
+	var rows []llamastashModelRow
+	if err := jsonUnmarshalBytes(out, &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // localStatusExtra metadata tambahan untuk halaman Status LlamaStash:
 // binary terpasang + `status --json` (proxy.listen/auth/build, host stats,
 // launch berjalan). proxyBase = Base URL provider lokal dari template.

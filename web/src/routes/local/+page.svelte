@@ -297,17 +297,25 @@
 						{#each status.models as m (m.name)}
 							<tr>
 								<td class="mono">{m.name}</td>
-								<td>{#if m.loaded}<span class="badge ok"><span class="dot"></span>loaded</span>{:else}<span class="badge info">idle</span>{/if}</td>
+								<td>
+									{#if m.loaded}
+										{#if m.state === 'loading'}<span class="badge warn"><span class="dot pulse"></span>memuat…</span>
+										{:else}<span class="badge ok"><span class="dot"></span>loaded</span>{/if}
+									{:else}<span class="badge info">idle</span>{/if}
+								</td>
 								<td>
 									<div class="row">
-										<button class="btn sm" disabled={busyModel === m.name + 'start'} onclick={() => toggleModel(m.name, 'start')}>
-											{#if busyModel === m.name + 'start'}<span class="spinner"></span>{:else}<Play size={12} />{/if}
-											{t('start')}
-										</button>
-										<button class="btn ghost sm" disabled={busyModel === m.name + 'stop'} onclick={() => toggleModel(m.name, 'stop')}>
-											{#if busyModel === m.name + 'stop'}<span class="spinner"></span>{:else}<Square size={12} />{/if}
-											{t('stop')}
-										</button>
+										{#if !m.loaded}
+											<button class="btn sm" disabled={busyModel === m.name + 'start'} onclick={() => toggleModel(m.name, 'start')}>
+												{#if busyModel === m.name + 'start'}<span class="spinner"></span>{:else}<Play size={12} />{/if}
+												{t('start')}
+											</button>
+										{:else}
+											<button class="btn ghost sm" disabled={busyModel === m.name + 'stop'} onclick={() => toggleModel(m.name, 'stop')}>
+												{#if busyModel === m.name + 'stop'}<span class="spinner"></span>{:else}<Square size={12} />{/if}
+												{t('stop')}
+											</button>
+										{/if}
 									</div>
 								</td>
 							</tr>

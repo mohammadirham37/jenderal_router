@@ -391,30 +391,14 @@ func parseModelList(ptype string, data []byte) []string {
 
 // llamastashCLIModels memanggil `llamastash list --json` bila binary ada.
 func llamastashCLIModels() ([]string, error) {
-	path := findLlamastashBin()
-	if path == "" {
-		return nil, fmt.Errorf("binary llamastash tidak ditemukan")
-	}
-	ctx := contextWithTimeoutCLI(10 * time.Second)
-	out, err := exec.CommandContext(ctx, path, "list", "--json").Output()
+	rows, err := llamastashCLIModelRows()
 	if err != nil {
 		return nil, err
 	}
-	var rows []struct {
-		Name string `json:"name"`
-		ID   string `json:"id"`
-	}
-	if err := jsonUnmarshalBytes(out, &rows); err != nil {
-		return nil, err
-	}
-	var names []string
+	names := make([]string, 0, len(rows))
 	for _, row := range rows {
-		n := row.Name
-		if n == "" {
-			n = row.ID
-		}
-		if n != "" {
-			names = append(names, n)
+		if row.Name != "" {
+			names = append(names, row.Name)
 		}
 	}
 	return names, nil
@@ -1010,42 +994,58 @@ func (a *App) handleLocalStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// /v1/models — daftar model yang ditemukan (termasuk yang belum dimuat)
-	var runningNames []string
-	if rm, ok := out["running_models"].([]string); ok {
-		runningNames = rm
+	// baris `list --json` — objek `status` hanya ada pada model yang
+	// launch-nya hidup; inilah sumber kebenaran badge loaded/idle
+	var cliRows []llamastashModelRow
+	cliOK := false
+	if rows, err := llamastashCLIModelRows(); err == nil {
+		cliRows, cliOK = rows, true
 	}
+	out["cli_available"] = cliOK
+
+	localModelState := func(name string) map[string]any {
+		loaded, state := false, ""
+		ln := strings.ToLower(name)
+		for _, row := range cliRows {
+			rn := strings.ToLower(row.Name)
+			if rn == "" || (!strings.Contains(ln, rn) && !strings.Contains(rn, ln)) {
+				continue
+			}
+			if row.Status == nil {
+				continue
+			}
+			st := strings.ToLower(row.Status.State)
+			if st == "error" || st == "stopped" || st == "" {
+				continue // launch mati/gagal — barisnya bisa saja masih tersisa
+			}
+			loaded, state = true, st
+		}
+		return map[string]any{"name": name, "loaded": loaded, "state": state}
+	}
+
 	if code, data := doGet("/v1/models"); code == 200 {
 		names := parseModelList("openai", data)
 		models := []map[string]any{}
 		for _, n := range names {
-			loaded := false
-			for _, rn := range runningNames {
-				if strings.Contains(strings.ToLower(n), strings.ToLower(rn)) || strings.Contains(strings.ToLower(rn), strings.ToLower(n)) {
-					loaded = true
-					break
-				}
-			}
-			models = append(models, map[string]any{"name": n, "loaded": loaded})
+			models = append(models, localModelState(n))
 		}
 		out["models"] = models
 	}
-	// coba CLI untuk info tambahan (bila binary tersedia di host)
-	if names, err := llamastashCLIModels(); err == nil {
-		out["cli_available"] = true
+	// tambah model yang hanya terlihat lewat CLI (belum terdaftar di proxy)
+	if cliOK {
 		existing, _ := out["models"].([]map[string]any)
 		known := map[string]bool{}
 		for _, m := range existing {
-			known[m["name"].(string)] = true
+			if s, ok := m["name"].(string); ok {
+				known[strings.ToLower(s)] = true
+			}
 		}
-		for _, n := range names {
-			if !known[n] {
-				existing = append(existing, map[string]any{"name": n, "loaded": false})
+		for _, row := range cliRows {
+			if row.Name != "" && !known[strings.ToLower(row.Name)] {
+				existing = append(existing, localModelState(row.Name))
 			}
 		}
 		out["models"] = existing
-	} else {
-		out["cli_available"] = false
 	}
 	// metadata instalasi untuk tombol Install di dashboard (FR-6.8)
 	for k, v := range localStatusExtra(a.cfg.LLamastashURL) {
