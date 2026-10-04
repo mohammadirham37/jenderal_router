@@ -268,6 +268,24 @@ func (a *App) pickTestModel(p *store.Provider, creds []*store.Credential) string
 }
 
 // handleSyncModels menyinkronkan daftar model dari provider (FR-1.6).
+// syncProviderModels tarik daftar model upstream ke sink DB gateway;
+// dipakai handler sinkron dan job unduhan model LlamaStash (otomatis).
+func (a *App) syncProviderModels(p *store.Provider) ([]string, error) {
+	creds, _ := a.st.ListCredentials(p.ID)
+	var key string
+	if len(creds) > 0 {
+		key, _ = a.st.DecryptSecret(creds[0].SecretEnc)
+	}
+	names, _, err := a.fetchUpstreamModels(p, key)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range names {
+		_ = a.st.UpsertModelSinkron(p.ID, n, 0)
+	}
+	return names, nil
+}
+
 func (a *App) handleSyncModels(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -278,24 +296,13 @@ func (a *App) handleSyncModels(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 404, map[string]string{"error": "provider tidak ada"})
 		return
 	}
-	creds, _ := a.st.ListCredentials(id)
-	var key string
-	if len(creds) > 0 {
-		key, _ = a.st.DecryptSecret(creds[0].SecretEnc)
-	}
-	names, source, err := a.fetchUpstreamModels(p, key)
+	names, err := a.syncProviderModels(p)
 	if err != nil {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error(), "source": source})
+		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	added := 0
-	for _, n := range names {
-		if err := a.st.UpsertModelSinkron(p.ID, n, 0); err == nil {
-			added++
-		}
-	}
-	a.audit(r, "provider.sync_models", "providers/"+fmtInt(id), nil, map[string]int{"found": added})
-	writeJSON(w, 200, map[string]any{"ok": true, "source": source, "models": names, "count": len(names)})
+	a.audit(r, "provider.sync_models", "providers/"+fmtInt(p.ID), nil, map[string]int{"found": len(names)})
+	writeJSON(w, 200, map[string]any{"ok": true, "models": names, "count": len(names)})
 }
 
 // fetchUpstreamModels mengambil daftar model upstream per format; LlamaStash

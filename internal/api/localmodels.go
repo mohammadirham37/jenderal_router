@@ -315,6 +315,14 @@ func (a *App) handleLocalModelDownload(w http.ResponseWriter, r *http.Request) {
 		}
 		job.succeed()
 		a.st.Audit(actorID, "local.model.download", "llamastash/"+spec, nil, map[string]any{"ok": true})
+		// sinkronkan ke gateway agar model baru langsung terpakai di chat
+		if p, err := a.st.GetProviderByPrefix("local"); err == nil {
+			if names, err := a.syncProviderModels(p); err == nil {
+				job.appendLog("sinkron: %d model terdaftar di gateway ✓", len(names))
+			} else {
+				job.appendLog("sinkron otomatis gagal: %s — klik 'Sinkron model' di halaman Provider", err.Error())
+			}
+		}
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"started": true, "status_url": "/api/admin/local/models/download/status"})
 }
