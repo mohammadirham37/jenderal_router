@@ -1,0 +1,26 @@
+# Reverse proxy dengan HTTPS otomatis (Let's Encrypt).
+# Hanya Caddy yang menghadap internet; app 20130 tetap internal (PRD §8).
+
+{
+	email admin@{$JR_DOMAIN}
+}
+
+{$JR_DOMAIN} {
+	encode zstd gzip
+
+	# SSE streaming: matikan buffering & perpanjang timeout
+	reverse_proxy jenderalrouter:20130 {
+		flush_interval -1
+		transport http {
+			response_header_timeout 24h
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}

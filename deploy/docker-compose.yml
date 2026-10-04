@@ -1,0 +1,73 @@
+# JenderalRouter — Docker Compose untuk VPS (PRD §10.1).
+# Caddy menangani HTTPS otomatis (Let's Encrypt); port publik hanya 80/443.
+# Port aplikasi 20130 dan LlamaStash 11435 tetap di jaringan internal/loopback.
+#
+# Pakai:
+#   1. Salin .env.example → .env, isi JR_DOMAIN
+#   2. docker compose up -d
+
+services:
+  jenderalrouter:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        VERSION: ${VERSION:-1.0.0}
+    image: jenderalrouter:latest
+    container_name: jenderalrouter
+    restart: unless-stopped
+    environment:
+      JR_ADDR: "0.0.0.0:20130"
+      JR_PUBLIC_URL: "https://${JR_DOMAIN:?isi JR_DOMAIN di .env}"
+      JR_DATA_DIR: "/data"
+      JR_TZ: "${JR_TZ:-Asia/Jakarta}"
+      JR_LOG_PROMPTS: "${JR_LOG_PROMPTS:-false}"
+      # LlamaStash di host (bukan container) — akses via gateway docker:
+      JR_LLAMASTASH_URL: "${JR_LLAMASTASH_URL:-http://host.docker.internal:11435/v1}"
+      extra_hosts:
+        - "host.docker.internal:host-gateway"
+    volumes:
+      - jr-data:/data
+    # PROFIL OPSIONAL — mode host memberi akses penuh jaringan host.
+    # Aktifkan bila LlamaStash menolak koneksi via host.docker.internal:
+    # network_mode: host
+    expose:
+      - "20130"
+    healthcheck:
+      test: ["CMD", "/jenderalrouter", "-healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: jenderalrouter-caddy
+    restart: unless-stopped
+    depends_on:
+      - jenderalrouter
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      JR_DOMAIN: "${JR_DOMAIN:?isi JR_DOMAIN di .env}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  # OPSIONAL — PostgreSQL (default deployment memakai SQLite di volume).
+  # Aktifkan lalu set JR_DATABASE_URL di service jenderalrouter.
+  # postgres:
+  #   image: postgres:16-alpine
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: jenderalrouter
+  #     POSTGRES_USER: jr
+  #     POSTGRES_PASSWORD: "${JR_PG_PASSWORD:?isi JR_PG_PASSWORD}"
+  #   volumes:
+  #     - pg-data:/var/lib/postgresql/data
+
+volumes:
+  jr-data:
+  caddy-data:
+  caddy-config:

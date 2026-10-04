@@ -1,0 +1,17 @@
+# binary build
+/dist/
+jenderalrouter
+jenderalrouter-linux-*
+
+# runtime data (db, master key, backup)
+data/
+*.db
+*.db-wal
+*.db-shm
+master.key
+
+# environment
+.env
+
+# tooling
+.zcodeignore

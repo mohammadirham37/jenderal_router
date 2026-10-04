@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="id" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JenderalRouter</title>
+<link rel="stylesheet" href="/assets/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛰️</text></svg>">
+</head>
+<body>
+<div id="app" class="hidden">
+  <aside id="sidebar">
+    <div class="brand"><span class="logo">🛰️</span><span>JenderalRouter</span></div>
+    <nav id="nav"></nav>
+    <div class="sidebar-foot">
+      <button id="themeToggle" class="btn ghost small" title="Theme">🌓</button>
+      <button id="langToggle" class="btn ghost small" title="Bahasa">ID</button>
+      <span id="me-email" class="muted small"></span>
+      <button id="logoutBtn" class="btn ghost small" data-i18n="logout">Keluar</button>
+    </div>
+  </aside>
+  <main id="main"></main>
+</div>
+
+<div id="auth-screen" class="center-screen hidden">
+  <div class="card auth-card" id="auth-card"></div>
+</div>
+
+<div id="toasts"></div>
+<div id="modal-root"></div>
+
+<script src="/assets/api.js"></script>
+<script src="/assets/i18n.js"></script>
+<script src="/assets/ui.js"></script>
+<script src="/assets/pages-admin.js"></script>
+<script src="/assets/pages-chat.js"></script>
+<script src="/assets/app.js"></script>
+</body>
+</html>

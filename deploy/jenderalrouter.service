@@ -1,0 +1,29 @@
+# systemd unit — alternatif instalasi tanpa Docker.
+# Letakkan di /etc/systemd/system/jenderalrouter.service lalu:
+#   systemctl daemon-reload && systemctl enable --now jenderalrouter
+
+[Unit]
+Description=JenderalRouter — gateway LLM self-hosted
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jenderalrouter
+Group=jenderalrouter
+ExecStart=/usr/local/bin/jenderalrouter
+Environment=JR_ADDR=127.0.0.1:20130
+Environment=JR_DATA_DIR=/var/lib/jenderalrouter
+EnvironmentFile=-/etc/default/jenderalrouter
+Restart=always
+RestartSec=3
+# Hardening ringan
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/jenderalrouter
+PrivateTmp=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
