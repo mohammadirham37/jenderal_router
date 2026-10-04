@@ -93,9 +93,11 @@ install_binary() {
     export PATH="/usr/local/go/bin:$PATH"
   fi
   echo ">> Build binary (linux/${GOARCH})…"
+  BUILD_VER="$(git -C "$REPO_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
   ( cd "$REPO_DIR" \
     && CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" go build -trimpath \
-       -ldflags "-s -w" -o /tmp/jenderalrouter-bin ./cmd/jenderalrouter )
+       -ldflags "-s -w -X github.com/jenderal/jenderalrouter/internal/api.Version=${BUILD_VER}" \
+       -o /tmp/jenderalrouter-bin ./cmd/jenderalrouter )
   install -m 0755 /tmp/jenderalrouter-bin /usr/local/bin/jenderalrouter
   rm -f /tmp/jenderalrouter-bin
 }
