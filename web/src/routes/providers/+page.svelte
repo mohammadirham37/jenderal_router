@@ -57,6 +57,8 @@
 	let cName = $state(''); let cPrefix = $state(''); let cURL = $state(''); let cType = $state('openai-compatible');
 	let adding = $state(false);
 	async function addProvider() {
+		if (useTemplate && !tplPrefix) { toast('pilih template provider dulu', 'err'); return; }
+		if (!useTemplate && (!cName || !cPrefix || !cURL)) { toast('nama, prefix, dan base URL wajib diisi', 'err'); return; }
 		adding = true;
 		try {
 			if (useTemplate) {
@@ -76,7 +78,15 @@
 	}
 	$effect(() => {
 		if (showAdd && templates.length === 0) {
-			api.get('/api/admin/templates').then((r) => (templates = r.templates || [])).catch(() => {});
+			api.get('/api/admin/templates')
+				.then((r) => {
+					templates = r.templates || [];
+					// pastikan prefix default valid (prefix asli: oa, an, gm, …)
+					if (!templates.find((x) => x.prefix === tplPrefix)) {
+						tplPrefix = templates[0]?.prefix || '';
+					}
+				})
+				.catch(() => {});
 		}
 	});
 
