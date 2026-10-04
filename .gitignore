@@ -1,7 +1,7 @@
-# binary build
+# binary build (root-anchored — jangan sampai mengabaikan cmd/jenderalrouter/)
 /dist/
-jenderalrouter
-jenderalrouter-linux-*
+/jenderalrouter
+/jenderalrouter-linux-*
 
 # runtime data (db, master key, backup)
 data/
