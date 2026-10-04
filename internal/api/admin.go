@@ -951,6 +951,39 @@ func (a *App) handleSystemBackup(w http.ResponseWriter, r *http.Request) {
 
 // ---- LlamaStash (FR-6.3) ----
 
+// normModelName bentuk baku nama model untuk pencocokan: lowercase + tanpa
+// sufiks .gguf (nama dari proxy: "X-Q6_K", dari CLI: "X-Q6_K.gguf").
+func normModelName(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	return strings.TrimSuffix(s, ".gguf")
+}
+
+// namesMatch pencocokan longgar dua arah — nama proxy sering memuat
+// kualifikasi repo, nama CLI sering memuat sufiks file.
+func namesMatch(a, b string) bool {
+	a, b = normModelName(a), normModelName(b)
+	if a == "" || b == "" {
+		return false
+	}
+	return strings.Contains(a, b) || strings.Contains(b, a)
+}
+
+// localModelStateFromRows status satu model dari baris `list --json`:
+// objek `status` hanya ada pada launch yang hidup.
+func localModelStateFromRows(name string, cliRows []llamastashModelRow) map[string]any {
+	loaded, state := false, ""
+	for _, row := range cliRows {
+		if !namesMatch(name, row.displayName()) {
+			continue
+		}
+		if l, s := row.running(); l {
+			loaded, state = true, s
+			break
+		}
+	}
+	return map[string]any{"name": name, "loaded": loaded, "state": state}
+}
+
 func (a *App) handleLocalStatus(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{"daemon_alive": false, "models": []any{}, "url": a.cfg.LLamastashURL}
 	base := strings.TrimRight(a.cfg.LLamastashURL, "/")
@@ -1008,46 +1041,32 @@ func (a *App) handleLocalStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	out["cli_available"] = cliOK
 
-	localModelState := func(name string) map[string]any {
-		loaded, state := false, ""
-		ln := strings.ToLower(name)
-		for _, row := range cliRows {
-			rn := strings.ToLower(row.Name)
-			if rn == "" || (!strings.Contains(ln, rn) && !strings.Contains(rn, ln)) {
-				continue
-			}
-			if row.Status == nil {
-				continue
-			}
-			st := strings.ToLower(row.Status.State)
-			if st == "error" || st == "stopped" || st == "" {
-				continue // launch mati/gagal — barisnya bisa saja masih tersisa
-			}
-			loaded, state = true, st
-		}
-		return map[string]any{"name": name, "loaded": loaded, "state": state}
-	}
-
 	if code, data := doGet("/v1/models"); code == 200 {
 		names := parseModelList("openai", data)
 		models := []map[string]any{}
 		for _, n := range names {
-			models = append(models, localModelState(n))
+			models = append(models, localModelStateFromRows(n, cliRows))
 		}
 		out["models"] = models
 	}
-	// tambah model yang hanya terlihat lewat CLI (belum terdaftar di proxy)
+	// tambah model yang hanya terlihat lewat CLI (belum terdaftar di proxy);
+	// cocokkan longgar agar nama proxy "X" dan nama CLI "X.gguf" tidak dobel
 	if cliOK {
 		existing, _ := out["models"].([]map[string]any)
-		known := map[string]bool{}
-		for _, m := range existing {
-			if s, ok := m["name"].(string); ok {
-				known[strings.ToLower(s)] = true
-			}
-		}
 		for _, row := range cliRows {
-			if row.Name != "" && !known[strings.ToLower(row.Name)] {
-				existing = append(existing, localModelState(row.Name))
+			n := row.displayName()
+			if n == "" {
+				continue
+			}
+			dup := false
+			for _, m := range existing {
+				if s, ok := m["name"].(string); ok && namesMatch(n, s) {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				existing = append(existing, localModelStateFromRows(n, cliRows))
 			}
 		}
 		out["models"] = existing

@@ -81,3 +81,17 @@ func TestParseListJSONGarbage(t *testing.T) {
 		}
 	}
 }
+
+func TestNamesMatchDedupe(t *testing.T) {
+	cases := []struct{ a, b string; want bool }{
+		{"Qwen_Qwen3.6-27B-Q6_K", "Qwen_Qwen3.6-27B-Q6_K.gguf", true},
+		{"glm-4.7-flash-q6_k.gguf", "GLM-4.7-Flash-Q6_K", true},
+		{"Qwen3-30B-A3B-Q6_K", "gpt-oss-20b-Q6_K", false},
+		{"", "x", false},
+	}
+	for _, c := range cases {
+		if got := namesMatch(c.a, c.b); got != c.want {
+			t.Fatalf("namesMatch(%q,%q)=%v, harapan %v", c.a, c.b, got, c.want)
+		}
+	}
+}
