@@ -120,25 +120,9 @@ sudo ufw allow 80,443/tcp
 sudo ufw enable
 ```
 
-**6) HTTPS dengan Caddy** (disarankan untuk domain publik; streaming SSE otomatis aman):
-
-```bash
-sudo apt -y install caddy
-
-sudo tee /etc/caddy/Caddyfile >/dev/null <<'CADDY'
-ai.domainanda.com {
-    reverse_proxy 127.0.0.1:20130 {
-        flush_interval -1
-    }
-}
-CADDY
-
-sudo systemctl reload caddy
-```
-
-Ganti `ai.domainanda.com` dengan domain Anda (A record mengarah ke IP VPS).
-Sertifikat Let's Encrypt diterbitkan otomatis. Tanpa domain? Akses lewat
-SSH tunnel (sesuaikan `-p` bila SSH server Anda bukan port 22):
+**6) HTTPS / akses LAN dengan Caddy** — lihat bagian **Opsi B+ — Caddy** di
+bawah: varian (a) untuk akses via IP LAN, varian (b) untuk HTTPS domain.
+Tanpa keduanya, akses via SSH tunnel (sesuaikan `-p` bila SSH bukan port 22):
 
 ```bash
 ssh -p PORT_SSH_ANDA -L 20130:127.0.0.1:20130 root@IP-VPS-ANDA
@@ -167,6 +151,52 @@ sudo docker compose up -d --build
 
 ---
 
+### Opsi B+ — Caddy: akses mudah via IP LAN atau domain (disarankan)
+
+Setelah aplikasi berjalan (Cara A/B/C), pasang Caddy supaya dashboard bisa
+dibuka dari PC lain **tanpa SSH tunnel**. Aplikasi tetap listen di loopback —
+hanya Caddy yang menghadap jaringan.
+
+**a) Tanpa domain — akses via IP di jaringan lokal:**
+
+```bash
+sudo apt -y install caddy
+
+sudo tee /etc/caddy/Caddyfile >/dev/null <<'CADDY'
+:80 {
+    reverse_proxy 127.0.0.1:20130 {
+        flush_interval -1
+    }
+}
+CADDY
+
+sudo systemctl reload caddy
+```
+
+Akses dari PC lain: `http://<ip-server>/` — contoh `http://172.26.8.104/`.
+Port 20130 tetap tertutup dari luar (UFW hanya membuka 80/443).
+
+**b) Dengan domain — HTTPS otomatis (Let's Encrypt):**
+
+```bash
+sudo tee /etc/caddy/Caddyfile >/dev/null <<'CADDY'
+ai.domainanda.com {
+    reverse_proxy 127.0.0.1:20130 {
+        flush_interval -1
+    }
+}
+CADDY
+
+sudo systemctl reload caddy
+```
+
+Akses: `https://ai.domainanda.com/`. Syarat: A record domain mengarah ke IP
+server. `flush_interval -1` wajib agar streaming SSE tidak ter-buffer.
+
+Alternatif tanpa Caddy sama sekali: SSH tunnel
+`ssh -p PORT_SSH_ANDA -L 20130:127.0.0.1:20130 user@ip-server` lalu buka
+`http://localhost:20130`.
+
 ### Akses pertama
 
 Buka `https://domain-anda.com` (atau `http://localhost:20130` via tunnel).
@@ -177,10 +207,9 @@ key (menu **User & Peran**), lalu pakai di klien.
 
 ### Akses dari PC lain di jaringan lokal (LAN)?
 
-Secara default aplikasi hanya listen di `127.0.0.1` (keamanan). Untuk akses
-LAN, pasang Caddy dengan site address `:80` yang mem-proxy ke
-`127.0.0.1:20130`, atau publikasikan port aplikasi ke subnet LAN —
-panduan lengkap: [docs/OPERATIONS.md §8](docs/OPERATIONS.md).
+Gunakan **Opsi B+ — Caddy** di atas (varian a: `:80`), atau publikasikan port
+aplikasi ke subnet LAN — panduan lengkap:
+[docs/OPERATIONS.md §8](docs/OPERATIONS.md).
 
 ### Verifikasi instalasi
 
