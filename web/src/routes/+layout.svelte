@@ -34,8 +34,6 @@
 
 	let { children } = $props();
 
-	let ready = $state(false);
-
 	setUnauthorizedHandler(() => {
 		resetCSRF();
 		app.me = null;
@@ -43,13 +41,12 @@
 	});
 
 	$effect(() => {
-		// bootstrap sesi sekali
+		// bootstrap sesi sekali saat layout terpasang (hard load)
 		(async () => {
 			try {
 				const res = await api.get('/api/me', { noRedirect: true });
 				app.me = res.user;
 				setCSRF(res.csrf);
-				ready = true;
 				if (page.url.pathname === '/') goto('/dashboard', { replaceState: true });
 			} catch {
 				goto('/login', { replaceState: true });
@@ -74,7 +71,7 @@
 
 {#if page.url.pathname === '/login'}
 	{@render children()}
-{:else if ready && app.me}
+{:else if app.me}
 	<div class="shell">
 		<aside class="sidebar">
 			<div class="brand">
