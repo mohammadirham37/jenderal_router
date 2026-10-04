@@ -12,7 +12,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
-APP_DIR=/opt/jenderalrouter
 GOARCH="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
 REPO_RAW="https://github.com/mohammadirham37/jenderal_router"
 RELEASE="${JR_RELEASE:-latest}"   # tag rilis, mis. v1.0.0
@@ -168,26 +167,28 @@ https://download.docker.com/linux/ubuntu ${VERSION_CODENAME:-noble} stable" \
       systemctl enable --now docker
     fi
 
-    echo ">> Menyalin berkas deploy dari repo lokal ke ${APP_DIR}…"
-    mkdir -p "$APP_DIR"
-    install -m 0644 "$SCRIPT_DIR/docker-compose.yml" "$APP_DIR/docker-compose.yml"
-    install -m 0644 "$SCRIPT_DIR/Caddyfile"          "$APP_DIR/Caddyfile"
-    install -m 0644 "$SCRIPT_DIR/.env.example"       "$APP_DIR/.env.example"
-    cd "$APP_DIR"
+    # compose dijalankan LANGSUNG dari deploy/ di repo — build context `..`
+    # menunjuk root repo (berisi source), jadi tanpa penyalinan ke /opt.
+    cd "$REPO_DIR/deploy"
 
     if [[ ! -f .env ]]; then
       cp .env.example .env
     fi
-    # isi domain bila masih contoh
-    if grep -q '^JR_DOMAIN=ai.domainanda.com' .env || ! grep -q '^JR_DOMAIN=' .env; then
-      read -r -p "Masukkan domain publik (mis. ai.domainanda.com; kosongkan bila belum punya domain): " DOMAIN || DOMAIN=""
-      if [[ -n "$DOMAIN" ]]; then
-        sed -i "s|^JR_DOMAIN=.*|JR_DOMAIN=${DOMAIN}|" .env
+    read -r -p "Masukkan domain publik (mis. ai.domainanda.com; kosongkan bila belum punya domain): " DOMAIN || DOMAIN=""
+    if [[ -n "$DOMAIN" ]]; then
+      sed -i "s|^JR_DOMAIN=.*|JR_DOMAIN=${DOMAIN}|" .env
+      if grep -q '^JR_PUBLIC_URL=' .env; then
+        sed -i "s|^JR_PUBLIC_URL=.*|JR_PUBLIC_URL=https://${DOMAIN}|" .env
       else
-        # tanpa domain: Caddy dilewati, akses via SSH tunnel ke 20130
-        sed -i "s|^JR_DOMAIN=.*|JR_DOMAIN=localhost|" .env
-        echo "!! Tanpa domain, Caddy akan gagal terbit sertifikat — akses lewat SSH tunnel ke port 20130."
+        echo "JR_PUBLIC_URL=https://${DOMAIN}" >> .env
       fi
+    else
+      sed -i "s|^JR_DOMAIN=.*|JR_DOMAIN=localhost|" .env
+      # tanpa domain: PublicURL kosong agar cookie tidak Secure (akses via
+      # tunnel http://localhost:20130), dan bersihkan nilai lama yang salah
+      sed -i "s|^JR_PUBLIC_URL=.*|JR_PUBLIC_URL=|" .env
+      sed -i "/^#\?JR_PUBLIC_URL=https:\/\/localhost/d" .env
+      echo "!! Tanpa domain: Caddy tidak akan terbit sertifikat — akses lewat SSH tunnel ke 20130."
     fi
 
     echo ">> Menjalankan docker compose (build image dari source — beberapa menit pertama)…"
@@ -195,15 +196,17 @@ https://download.docker.com/linux/ubuntu ${VERSION_CODENAME:-noble} stable" \
 
     setup_firewall
 
+    DASH_DOMAIN="$(grep '^JR_DOMAIN=' .env | cut -d= -f2)"
     cat <<NEXT
 
 ==========================================================
  JenderalRouter (Docker Compose) terpasang!
- Perintah : cd ${APP_DIR} && docker compose logs -f
- Dashboard: https://$(grep '^JR_DOMAIN=' ${APP_DIR}/.env | cut -d= -f2)
+ Perintah : cd ${REPO_DIR}/deploy && docker compose logs -f
+ Dashboard: https://${DASH_DOMAIN}
             (bila domain belum diarahkan, akses via SSH tunnel:
              ssh -p PORT_SSH_ANDA -L 20130:127.0.0.1:20130 user@server
              lalu buka http://localhost:20130)
+ Cek      : curl http://127.0.0.1:20130/healthz
  Wizard pertama akan meminta akun admin (tanpa password bawaan).
 ==========================================================
 NEXT

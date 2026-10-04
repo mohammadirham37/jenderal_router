@@ -1,0 +1,9 @@
+.git
+dist/
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+docs/
+prd-jenderal-router.md

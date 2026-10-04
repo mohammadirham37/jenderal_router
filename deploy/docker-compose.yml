@@ -1,10 +1,10 @@
 # JenderalRouter — Docker Compose untuk VPS (PRD §10.1).
 # Caddy menangani HTTPS otomatis (Let's Encrypt); port publik hanya 80/443.
-# Port aplikasi 20130 dan LlamaStash 11435 tetap di jaringan internal/loopback.
+# Port aplikasi 20130 hanya di-publish ke loopback host (health check & tunnel).
 #
-# Pakai:
-#   1. Salin .env.example → .env, isi JR_DOMAIN
-#   2. docker compose up -d
+# Pakai (jalankan dari folder deploy/ hasil clone):
+#   1. cp .env.example .env lalu isi JR_DOMAIN (dan JR_PUBLIC_URL bila ada domain)
+#   2. docker compose up -d --build
 
 services:
   jenderalrouter:
@@ -18,14 +18,17 @@ services:
     restart: unless-stopped
     environment:
       JR_ADDR: "0.0.0.0:20130"
-      JR_PUBLIC_URL: "https://${JR_DOMAIN:?isi JR_DOMAIN di .env}"
+      # Kosong bila tanpa domain (akses via SSH tunnel http://localhost:20130);
+      # cookie Secure otomatis hanya aktif bila JR_PUBLIC_URL https.
+      JR_PUBLIC_URL: "${JR_PUBLIC_URL:-}"
       JR_DATA_DIR: "/data"
       JR_TZ: "${JR_TZ:-Asia/Jakarta}"
       JR_LOG_PROMPTS: "${JR_LOG_PROMPTS:-false}"
       # LlamaStash di host (bukan container) — akses via gateway docker:
       JR_LLAMASTASH_URL: "${JR_LLAMASTASH_URL:-http://host.docker.internal:11435/v1}"
-      extra_hosts:
-        - "host.docker.internal:host-gateway"
+    # host.docker.internal → IP host (untuk LlamaStash di host)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - jr-data:/data
     # Port app hanya di-publish ke loopback host — publik tetap lewat Caddy.
