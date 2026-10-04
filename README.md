@@ -38,7 +38,10 @@ Spesifikasi minimum: **1 vCPU / 1 GB RAM** (hanya provider cloud); disarankan **
 ### Cara A — Skrip otomatis (paling cepat)
 
 Skrip `install-ubuntu.sh` mendeteksi versi Ubuntu otomatis, membuat user sistem,
-memasang service systemd, dan mengatur firewall (hanya 80/443 ke publik):
+memasang service systemd, dan mengatur firewall (hanya 80/443 ke publik).
+**Port SSH Anda dideteksi otomatis** (termasuk yang bukan 22) dan diizinkan di
+UFW agar sesi SSH tidak terputus — bila mode `binary`, skrip juga otomatis
+build dari source bila rilis binary belum tersedia:
 
 ```bash
 git clone https://github.com/mohammadirham37/jenderal_router.git
@@ -135,8 +138,12 @@ sudo systemctl reload caddy
 
 Ganti `ai.domainanda.com` dengan domain Anda (A record mengarah ke IP VPS).
 Sertifikat Let's Encrypt diterbitkan otomatis. Tanpa domain? Akses lewat
-SSH tunnel: `ssh -L 20130:127.0.0.1:20130 root@IP-VPS-ANDA` lalu buka
-`http://localhost:20130`.
+SSH tunnel (sesuaikan `-p` bila SSH server Anda bukan port 22):
+
+```bash
+ssh -p PORT_SSH_ANDA -L 20130:127.0.0.1:20130 root@IP-VPS-ANDA
+# lalu buka http://localhost:20130 di browser
+```
 
 ---
 
@@ -175,7 +182,9 @@ curl http://127.0.0.1:20130/healthz     # {"status":"ok","version":"..."}
 curl http://127.0.0.1:20130/readyz      # {"status":"ready"}
 ```
 
-Jika kedua perintah itu menjawab JSON, gateway siap dipakai.
+Berlaku untuk mode binary maupun Docker (port 20130 hanya di-publish ke
+loopback host — publik tetap lewat Caddy). Jika kedua perintah menjawab JSON,
+gateway siap dipakai.
 
 ## Pakai dari klien
 

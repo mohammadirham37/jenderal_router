@@ -18,8 +18,8 @@ FROM scratch
 LABEL org.opencontainers.image.title="JenderalRouter"
 LABEL org.opencontainers.image.description="Gateway LLM self-hosted multi-user (OpenAI + Anthropic compatible)"
 COPY --from=build /out/jenderalrouter /jenderalrouter
-# user non-root; data dir ditulis via volume
-USER 65534:65534
+# Catatan: proses berjalan sebagai root DI DALAM container agar bisa menulis
+# volume /data; port 20130 hanya di-publish ke loopback host oleh compose.
 ENV JR_ADDR=0.0.0.0:20130 \
     JR_DATA_DIR=/data
 VOLUME ["/data"]

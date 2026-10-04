@@ -28,11 +28,10 @@ services:
         - "host.docker.internal:host-gateway"
     volumes:
       - jr-data:/data
-    # PROFIL OPSIONAL — mode host memberi akses penuh jaringan host.
-    # Aktifkan bila LlamaStash menolak koneksi via host.docker.internal:
-    # network_mode: host
-    expose:
-      - "20130"
+    # Port app hanya di-publish ke loopback host — publik tetap lewat Caddy.
+    # Ini membuat `curl http://127.0.0.1:20130/healthz` berfungsi di host.
+    ports:
+      - "127.0.0.1:20130:20130"
     healthcheck:
       test: ["CMD", "/jenderalrouter", "-healthcheck"]
       interval: 30s
