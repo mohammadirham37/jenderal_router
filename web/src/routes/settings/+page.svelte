@@ -27,6 +27,35 @@
 		].join('\n');
 		navigator.clipboard.writeText(cmd).then(() => toast('perintah disalin ✓', 'ok')).catch(() => {});
 	}
+	function copyHelperCommand() {
+		const cmd = 'sudo /usr/local/bin/jenderalrouter install-update-helper';
+		navigator.clipboard.writeText(cmd).then(() => toast('perintah disalin ✓', 'ok')).catch(() => {});
+	}
+
+	// pasang binary hasil stage + restart service lewat helper (tanpa SSH)
+	let applying = $state(false);
+	async function applyStaged() {
+		applying = true;
+		try {
+			await api.post('/api/admin/system/update/apply', {});
+			toast('Memasang binary & me-restart service…', 'info');
+		} catch (e: any) {
+			toast(e.message, 'err');
+			applying = false;
+			return;
+		}
+		// service berhenti sebentar saat helper me-restart — tunggu sampai aktif lagi
+		for (let i = 0; i < 60; i++) {
+			await new Promise((r) => setTimeout(r, 2000));
+			try {
+				upd = await api.get('/api/admin/system/update/status', { noRedirect: true });
+				if (!upd.staged_binary) break;
+			} catch { /* restart sedang berlangsung */ }
+		}
+		if (upd && !upd.staged_binary) toast('Pembaruan terpasang & service aktif ✓', 'ok');
+		else toast('Service belum konfirmasi — cek `systemctl status jenderalrouter` di host', 'err');
+		applying = false;
+	}
 
 	async function backup() {
 		try { await api.post('/api/admin/system/backup'); toast(t('save') + ' ✓', 'ok'); }
@@ -188,17 +217,36 @@
 		{#if upd.staged_binary}
 			<div style="margin-top:12px;padding:12px;border-radius:10px;background:color-mix(in srgb, var(--warn) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn) 40%, transparent)">
 				<div class="small" style="font-weight:700;margin-bottom:6px">⚠ Binary baru sudah dibangun tetapi BELUM AKTIF</div>
-				<p class="muted small" style="margin:0 0 8px">
-					Pembaruan memakai mirror internal — folder clone lain (mis. ~/jenderal_router) tidak diubah.
-					Pasang binary hasil stage lewat SSH:
-				</p>
-				<pre class="logbox" style="margin-bottom:8px">sudo systemctl stop jenderalrouter
-sudo install -m 0755 {upd.repo_dir ? upd.repo_dir.replace('/src','') : '/var/lib/jenderalrouter'}/updates/jenderalrouter.new /usr/local/bin/jenderalrouter
-sudo rm -f {upd.repo_dir ? upd.repo_dir.replace('/src','') : '/var/lib/jenderalrouter'}/updates/jenderalrouter.new
+				{#if upd.sudo_apply_available}
+					<p class="muted small" style="margin:0 0 10px">
+						Helper pembaruan aktif — pasang binary hasil stage dan restart service langsung dari sini, tanpa SSH.
+						(HTTP bisa terputus sesaat saat service di-restart.)
+					</p>
+					<button class="btn" onclick={applyStaged} disabled={applying}>
+						{#if applying}<span class="spinner"></span>{:else}<Rocket size={15} />{/if}
+						Terapkan & restart sekarang
+					</button>
+				{:else}
+					<p class="muted small" style="margin:0 0 8px">
+						Helper pembaruan belum terpasang. Jalankan <b>sekali saja</b> di host (SSH) — setelah itu semua
+						update berikutnya terpasang otomatis dari dashboard, tanpa SSH lagi:
+					</p>
+					<pre class="logbox" style="margin-bottom:8px">sudo /usr/local/bin/jenderalrouter install-update-helper</pre>
+					<div class="row">
+						<button class="btn sm" onclick={copyHelperCommand}><Copy size={13} /> Salin perintah</button>
+						<span class="muted small">lalu muat ulang halaman ini — tombol "Terapkan" akan muncul di sini</span>
+					</div>
+					<details style="margin-top:10px">
+						<summary class="muted small" style="cursor:pointer">atau pasang binary manual sekali ini (tanpa helper)</summary>
+						<pre class="logbox" style="margin:8px 0">sudo systemctl stop jenderalrouter
+sudo install -m 0755 {stagePath()} /usr/local/bin/jenderalrouter
+sudo rm -f {stagePath()}
 sudo systemctl start jenderalrouter</pre>
-				<button class="btn sm" onclick={copyStageCommands}>
-					<Copy size={13} /> Salin perintah
-				</button>
+						<button class="btn sm" onclick={copyStageCommands}>
+							<Copy size={13} /> Salin perintah
+						</button>
+					</details>
+				{/if}
 			</div>
 		{/if}
 		{#if (job?.job?.log?.length || updLog)}

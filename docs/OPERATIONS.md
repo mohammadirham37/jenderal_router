@@ -109,7 +109,12 @@ Perhatian: fallback streaming hanya terjadi **sebelum token pertama**
   - **helper sudo aktif** (dipasang `install-ubuntu.sh binary`, jawab Y):
     binary dipasang + service di-restart otomatis.
   - tanpa helper: binary distage di `<data>/updates/jenderalrouter.new`
-    dan perintah pemasangan manual ditampilkan.
+    dan dashboard menampilkan satu perintah pemasangan helper:
+    `sudo /usr/local/bin/jenderalrouter install-update-helper`
+    (sekali saja; setelah itu update berikutnya terpasang otomatis dari
+    dashboard — tombol **Terapkan & restart sekarang** memasang binary
+    hasil stage lewat `POST /api/admin/system/update/apply`). Perintah
+    pemasangan manual tanpa helper tetap tersedia sebagai fallback.
 - Di mode Docker: endpoint hanya menampilkan petunjuk host
   (`git pull && docker compose up -d --build`).
 - Risiko yang perlu diketahui: helper sudo mengeksekusi binary hasil build

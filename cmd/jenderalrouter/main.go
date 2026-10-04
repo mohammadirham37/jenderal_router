@@ -21,6 +21,11 @@ func main() {
 		return
 	}
 
+	// pasang helper root untuk update dari dashboard (root, sekali saja)
+	if len(os.Args) > 1 && os.Args[1] == "install-update-helper" {
+		os.Exit(api.InstallUpdateHelper())
+	}
+
 	// mode healthcheck container (dipakai Dockerfile HEALTHCHECK)
 	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
 		addr := os.Getenv("JR_ADDR")

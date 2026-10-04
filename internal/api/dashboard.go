@@ -105,6 +105,7 @@ func (a *App) routesDashboard() {
 	// pembaruan aplikasi dari dashboard
 	a.mux.HandleFunc("GET /api/admin/system/update/status", a.requireSession(a.handleSystemUpdateStatus, store.RoleAdmin, false))
 	a.mux.HandleFunc("POST /api/admin/system/update", a.requireSession(a.handleSystemUpdate, store.RoleSuperAdmin, true))
+	a.mux.HandleFunc("POST /api/admin/system/update/apply", a.requireSession(a.handleSystemUpdateApply, store.RoleSuperAdmin, true))
 	a.mux.HandleFunc("POST /api/admin/local/models/{name}/start", a.requireSession(a.handleLocalModelStart, store.RoleAdmin, true))
 	a.mux.HandleFunc("POST /api/admin/local/models/{name}/stop", a.requireSession(a.handleLocalModelStop, store.RoleAdmin, true))
 
