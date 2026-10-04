@@ -1026,14 +1026,15 @@ func (a *App) localModelToggle(w http.ResponseWriter, r *http.Request, action st
 		writeJSON(w, 400, map[string]string{"error": "nama model wajib"})
 		return
 	}
-	path, err := exec.LookPath("llamastash")
-	if err != nil {
+	path := findLlamastashBin()
+	if path == "" {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{
 			"error": "CLI llamastash tidak tersedia di dalam proses ini; jalankan '" + action + " " + name +
 				"' di host, atau pasang binary llamastash agar tombol ini aktif"})
 		return
 	}
 	var out []byte
+	var err error
 	if action == "start" {
 		// start --json → {name, launch_id, port, pid, preset, path} (v0.6.1);
 		// load model bisa lama (probe timeout daemon 120 dtk)
