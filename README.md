@@ -18,51 +18,164 @@ Terinspirasi [9Router](https://github.com/decolua/9router), dirancang **multi-us
 | 🖥️ Dashboard + Chat | Admin dashboard lengkap + chat playground dengan streaming, riwayat, markdown, dark/light, ID/EN |
 | 🔒 Keamanan | Argon2id, AES-256-GCM untuk secret provider, cookie HttpOnly/Secure/SameSite=Strict + CSRF, rate limit login, SSRF guard, wizard tanpa password bawaan |
 
-## Instalasi ≤ 10 menit (Ubuntu 22.04 / 24.04 / 26.04)
+## Instalasi di Server Ubuntu (22.04 / 24.04 / 26.04)
 
-### Cara A — binary + systemd (paling ringan; 1 vCPU / 1 GB cukup)
+### 0. Persiapan VPS (sekali di awal)
 
-```bash
-wget https://github.com/jenderal/jenderalrouter/releases/latest/download/jenderalrouter-linux-amd64.tar.gz
-tar -xzf jenderalrouter-linux-amd64.tar.gz
-sudo install -m 0755 jenderalrouter /usr/local/bin/
-sudo install -d -o root -g root /etc/default
-
-# service systemd (lihat deploy/jenderalrouter.service)
-sudo cp deploy/jenderalrouter.service /etc/systemd/system/
-sudo useradd --system --home /var/lib/jenderalrouter --shell /usr/sbin/nologin jenderalrouter || true
-sudo mkdir -p /var/lib/jenderalrouter && sudo chown jenderalrouter: /var/lib/jenderalrouter
-sudo systemctl daemon-reload && sudo systemctl enable --now jenderalrouter
-```
-
-Atau sekali jalan: `sudo ./deploy/install-ubuntu.sh binary`
-
-### Cara B — Docker Compose + Caddy (HTTPS otomatis)
+Login ke VPS dan siapkan dependensi dasar:
 
 ```bash
-git clone https://github.com/jenderal/jenderalrouter && cd jenderalrouter/deploy
-cp .env.example .env   # isi JR_DOMAIN=ai.domainanda.com
-docker compose up -d --build
+ssh root@IP-VPS-ANDA
+
+sudo apt update && sudo apt -y upgrade
+sudo apt -y install curl git ca-certificates
 ```
 
-Atau: `sudo ./deploy/install-ubuntu.sh docker`
+Spesifikasi minimum: **1 vCPU / 1 GB RAM** (hanya provider cloud); disarankan **2 vCPU / 4 GB** (bisa jalankan model lokal kecil).
+
+---
+
+### Cara A — Skrip otomatis (paling cepat)
+
+Skrip `install-ubuntu.sh` mendeteksi versi Ubuntu otomatis, membuat user sistem,
+memasang service systemd, dan mengatur firewall (hanya 80/443 ke publik):
+
+```bash
+git clone https://github.com/mohammadirham37/jenderal_router.git
+cd jenderal_router
+
+sudo ./deploy/install-ubuntu.sh binary    # mode binary + systemd (tanpa Docker)
+# atau
+sudo ./deploy/install-ubuntu.sh docker    # mode Docker Compose + Caddy (HTTPS otomatis)
+```
+
+Setelah selesai, lanjut ke **Akses pertama** di bawah.
+
+---
+
+### Cara B — Manual: binary + systemd (paling ringan; tanpa Docker)
+
+**1) Dapatkan binary.** Unduh dari Releases (jika sudah tersedia), atau build dari source:
+
+```bash
+# opsi 1: unduh binary rilis (linux amd64)
+curl -fSL -o jr.tar.gz https://github.com/mohammadirham37/jenderal_router/releases/latest/download/jenderalrouter-linux-amd64.tar.gz
+tar -xzf jr.tar.gz                       # menghasilkan file: jenderalrouter-linux-amd64
+BIN=jenderalrouter-linux-amd64
+
+# opsi 2: build dari source (butuh Go 1.23+, tanpa CGO)
+git clone https://github.com/mohammadirham37/jenderal_router.git
+cd jenderal_router && ./scripts/build.sh && cd ..
+BIN=jenderal_router/dist/jenderalrouter-linux-amd64
+```
+
+> Punya VPS ARM (mis. Oracle/Ampere)? Ganti `amd64` menjadi `arm64` di semua perintah.
+
+**2) Pasang binary + user sistem + direktori data:**
+
+```bash
+sudo install -m 0755 "$BIN" /usr/local/bin/jenderalrouter
+
+sudo useradd --system --home /var/lib/jenderalrouter --shell /usr/sbin/nologin jenderalrouter
+sudo mkdir -p /var/lib/jenderalrouter
+sudo chown jenderalrouter:jenderalrouter /var/lib/jenderalrouter
+sudo chmod 700 /var/lib/jenderalrouter
+```
+
+**3) File konfigurasi environment:**
+
+```bash
+sudo tee /etc/default/jenderalrouter >/dev/null <<'ENV'
+JR_ADDR=127.0.0.1:20130
+JR_DATA_DIR=/var/lib/jenderalrouter
+JR_TZ=Asia/Jakarta
+JR_LOG_PROMPTS=false
+# Opsional:
+# JR_PUBLIC_URL=https://ai.domainanda.com
+# JR_LLAMASTASH_URL=http://127.0.0.1:11435/v1
+ENV
+sudo chmod 600 /etc/default/jenderalrouter
+```
+
+**4) Service systemd:**
+
+```bash
+sudo curl -fSL -o /etc/systemd/system/jenderalrouter.service \
+  https://raw.githubusercontent.com/mohammadirham37/jenderal_router/main/deploy/jenderalrouter.service
+# (bila build dari source: sudo cp jenderal_router/deploy/jenderalrouter.service /etc/systemd/system/)
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now jenderalrouter
+sudo systemctl status jenderalrouter --no-pager
+```
+
+**5) Firewall** — hanya 80/443 yang menghadap publik; port aplikasi tetap loopback:
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 80,443/tcp
+sudo ufw enable
+```
+
+**6) HTTPS dengan Caddy** (disarankan untuk domain publik; streaming SSE otomatis aman):
+
+```bash
+sudo apt -y install caddy
+
+sudo tee /etc/caddy/Caddyfile >/dev/null <<'CADDY'
+ai.domainanda.com {
+    reverse_proxy 127.0.0.1:20130 {
+        flush_interval -1
+    }
+}
+CADDY
+
+sudo systemctl reload caddy
+```
+
+Ganti `ai.domainanda.com` dengan domain Anda (A record mengarah ke IP VPS).
+Sertifikat Let's Encrypt diterbitkan otomatis. Tanpa domain? Akses lewat
+SSH tunnel: `ssh -L 20130:127.0.0.1:20130 root@IP-VPS-ANDA` lalu buka
+`http://localhost:20130`.
+
+---
+
+### Cara C — Docker Compose + Caddy (HTTPS otomatis)
+
+```bash
+sudo apt -y install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+sudo apt update && sudo apt -y install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+git clone https://github.com/mohammadirham37/jenderal_router.git
+cd jenderal_router/deploy
+cp .env.example .env
+nano .env                       # isi JR_DOMAIN=ai.domainanda.com
+sudo docker compose up -d --build
+```
+
+---
 
 ### Akses pertama
 
-Buka `http://127.0.0.1:20130` (SSH tunnel: `ssh -L 20130:127.0.0.1:20130 vps`) atau domain Anda.
-**Wizard pertama** meminta pembuatan akun super admin — tidak ada password bawaan (minimal 12 karakter, campuran huruf besar/kecil/angka).
+Buka `https://domain-anda.com` (atau `http://localhost:20130` via tunnel).
+**Wizard pertama** meminta pembuatan akun super admin — tidak ada password
+bawaan (minimal 12 karakter, campuran huruf besar/kecil/angka).
+Setelah masuk: tambah provider (menu **Provider → Dari Template**), buat API
+key (menu **User & Peran**), lalu pakai di klien.
 
-### HTTPS dengan Caddy (tanpa Docker)
+### Verifikasi instalasi
 
-```caddyfile
-ai.domainanda.com {
-    reverse_proxy 127.0.0.1:20130 {
-        flush_interval -1   # wajib untuk streaming SSE
-    }
-}
+```bash
+curl http://127.0.0.1:20130/healthz     # {"status":"ok","version":"..."}
+curl http://127.0.0.1:20130/readyz      # {"status":"ready"}
 ```
 
-Port publik hanya **80/443**. Port aplikasi (20130) dan LlamaStash (11435) tetap loopback.
+Jika kedua perintah itu menjawab JSON, gateway siap dipakai.
 
 ## Pakai dari klien
 
