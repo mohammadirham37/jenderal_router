@@ -4,7 +4,7 @@
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import LangToggle from '$lib/components/LangToggle.svelte';
 	import { api, setCSRF } from '$lib/api';
-	import { t, toast } from '$lib/stores.svelte';
+	import { app, t, toast } from '$lib/stores.svelte';
 
 	let needsSetup = $state<boolean | null>(null);
 	let email = $state('');
