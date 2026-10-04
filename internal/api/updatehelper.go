@@ -77,6 +77,7 @@ case "${1:-}" in
     /usr/bin/systemctl stop jenderalrouter || true
     /usr/bin/install -m 0755 "$STAGE" /usr/local/bin/jenderalrouter
     rm -f "$STAGE"
+    rm -f /var/lib/jenderalrouter/updates/apply.request
     /usr/bin/systemctl start jenderalrouter
     ;;
   *)

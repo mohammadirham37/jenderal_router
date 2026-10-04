@@ -451,6 +451,7 @@ func (a *App) handleSystemUpdate(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
+		job.appendLog("⏳ job pembaruan dimulai (versi berjalan %s)", Version)
 		fail := func(msg string) {
 			job.mu.Lock()
 			job.running, job.done, job.ok, job.err = false, true, false, msg
