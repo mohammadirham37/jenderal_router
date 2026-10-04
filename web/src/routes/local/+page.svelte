@@ -105,11 +105,11 @@
 		}
 	}
 
-	async function downloadModel(repo: string, file: string) {
+	async function downloadModel(repo: string, file: string, quant = '', resolve = false) {
 		if (!repo) { toast('isi repo dulu (owner/repo)', 'err'); return; }
 		dlStarting = true;
 		try {
-			await api.post('/api/admin/local/models/download', { repo, file });
+			await api.post('/api/admin/local/models/download', { repo, file, quant, resolve });
 			customRepo = '';
 			dlJob = { running: true, phase: 'menyiapkan unduhan', log: [] };
 			pollDlJob();
@@ -207,6 +207,7 @@
 											<div class="muted small">
 												{#if m.moe && m.params_active_b}MoE {fmtB(m.params_active_b)} aktif · {/if}
 												{m.justification}
+												{#if m.synthetic}· GGUF dicari otomatis dari penerbit kuantisasinya{/if}
 											</div>
 										</td>
 										<td class="small">
@@ -216,7 +217,7 @@
 										</td>
 										<td>
 											<button class="btn sm" disabled={dlStarting || !!dlJob?.running}
-												onclick={() => downloadModel(m.repo, m.file)}>
+												onclick={() => downloadModel(m.repo, m.file, m.quant, m.synthetic)}>
 												{#if dlStarting}<span class="spinner"></span>{:else}<Download size={12} />{/if}
 												Unduh
 											</button>
