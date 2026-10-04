@@ -26,11 +26,11 @@
 
 	async function loadStatus(fetchNew: boolean) {
 		updLoading = true;
-		try { upd = await api.get('/api/admin/system/update/status' + (fetchNew ? '?fetch=1' : '')); }
+		try { upd = await api.get('/api/admin/system/update/status?fetch=' + (fetchNew ? '1' : 'auto')); }
 		catch (e: any) { toast(e.message, 'err'); }
 		updLoading = false;
 	}
-	$effect(() => { loadStatus(false); (async () => {
+	$effect(() => { loadStatus(true); (async () => {
 		try { const s = await api.get('/api/admin/settings'); tgToken = s.settings.notification_telegram_token || ''; tgChat = s.settings.notification_chat_id || ''; } catch { /* */ }
 	})(); });
 
@@ -93,6 +93,22 @@
 	{#if updLoading && !upd}
 		<span class="spinner dark"></span> {t('loading')}…
 	{:else if upd}
+		{#if upd.in_container}
+			<p class="muted small" style="margin-bottom:10px">{upd.hint}</p>
+		{:else if upd.update_available}
+			<div class="kv" style="margin-bottom:10px;padding:10px;border-radius:10px;background:color-mix(in srgb, var(--warn) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn) 35%, transparent)">
+				<span class="badge warn"><span class="dot pulse"></span>UPDATE TERSEDIA</span>
+				<span class="small">
+					{upd.behind_commits} commit di belakang
+					{#if upd.remote_subject}&nbsp;· terbaru: <span class="mono">{upd.remote_commit}</span> {upd.remote_subject}{/if}
+				</span>
+			</div>
+		{:else if upd.repo_found}
+			<div class="kv" style="margin-bottom:10px">
+				<span class="badge ok"><span class="dot"></span>sudah versi terbaru</span>
+				<span class="muted small">commit lokal = remote ({upd.current_head})</span>
+			</div>
+		{/if}
 		<div style="margin-bottom:10px">
 			<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0"><span class="muted" style="min-width:210px">Versi terpasang:</span><span class="mono">{upd.version}</span></div>
 			<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0"><span class="muted" style="min-width:210px">Mode:</span><span class="mono">{upd.mode}</span></div>
@@ -100,7 +116,22 @@
 				<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0"><span class="muted" style="min-width:210px">Info:</span><span>{upd.hint}</span></div>
 			{/if}
 			{#if !upd.in_container}
-				<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0"><span class="muted" style="min-width:210px">Repo (mirror):</span><span class="mono">{upd.repo_found ? upd.repo_dir + ' @ ' + (upd.current_head || '') + ' [' + (upd.branch || '') + ']' : 'belum di-clone (otomatis saat update)'}</span></div>
+				<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0"><span class="muted" style="min-width:210px">Repo (mirror):</span><span class="mono">{upd.repo_found ? upd.repo_dir + ' [' + (upd.branch || '') + ']' : 'belum di-clone (otomatis)'}</span></div>
+			{#if upd.repo_found}
+				<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0">
+					<span class="muted" style="min-width:210px">Commit lokal / remote:</span>
+					<span class="mono">
+						{upd.current_head || '—'}
+						{#if upd.remote_head}
+							/ {upd.remote_head}
+							{#if upd.current_head && upd.remote_head !== upd.current_head}<span class="badge warn">beda</span>{:else}<span class="badge ok">sama</span>{/if}
+						{/if}
+					</span>
+				</div>
+				{#if upd.remote_subject}
+					<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0"><span class="muted" style="min-width:210px">Commit remote terbaru:</span><span class="mono">{upd.remote_commit}</span> {upd.remote_subject}</div>
+				{/if}
+			{/if}
 				<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0"><span class="muted" style="min-width:210px">Ketinggalan commit:</span><span class="mono">{upd.behind_commits ?? '—'}</span></div>
 				<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0"><span class="muted" style="min-width:210px">git / Go:</span><span class="mono">{upd.git_available ? '✓' : '✗'} / {upd.go_available ? '✓' : '✗'}</span></div>
 				<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0"><span class="muted" style="min-width:210px">Restart otomatis:</span><span>{upd.sudo_apply_available ? '✓ helper aktif' : '✗ (stage + perintah manual)'}</span></div>

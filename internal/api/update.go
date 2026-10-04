@@ -124,6 +124,49 @@ func gitHead(repo string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// gitRemoteHead hash commit terakhir di origin/<branch>.
+func gitRemoteHead(ctx context.Context, repo, branch string) string {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	out, err := gitCmd(ctx, repo, "rev-parse", "--short", "origin/"+branch).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// gitRemoteCommitInfo hash + subjek commit terbaru origin/<branch>.
+func gitRemoteCommitInfo(ctx context.Context, repo, branch string) (hash, subject string) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	out, err := gitCmd(ctx, repo, "log", "-1", "--format=%h%x1f%s", "origin/"+branch).Output()
+	if err != nil {
+		return "", ""
+	}
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "\x1f", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return parts[0], ""
+}
+
+var (
+	lastFetchMu   sync.Mutex
+	lastFetchTime time.Time
+)
+
+func markFetched() {
+	lastFetchMu.Lock()
+	lastFetchTime = time.Now()
+	lastFetchMu.Unlock()
+}
+
+func fetchStale() bool {
+	lastFetchMu.Lock()
+	defer lastFetchMu.Unlock()
+	return time.Since(lastFetchTime) > 5*time.Minute
+}
+
 // gitBehind menghitung commit di belakang origin/<branch> (setelah fetch).
 func gitBehind(ctx context.Context, repo string) (int, error) {
 	branch := gitBranch(repo)
@@ -207,10 +250,11 @@ func (a *App) handleSystemUpdateStatus(w http.ResponseWriter, r *http.Request) {
 
 func updateStatusView(a *App, r *http.Request) map[string]any {
 	st := map[string]any{
-		"version":      Version,
-		"in_container": inContainer(),
-		"mode":         "binary",
-		"busy":         updateBusy,
+		"version":          Version,
+		"in_container":     inContainer(),
+		"mode":             "binary",
+		"busy":             updateBusy,
+		"update_available": false,
 	}
 	if inContainer() {
 		st["mode"] = "docker"
@@ -229,22 +273,47 @@ func updateStatusView(a *App, r *http.Request) map[string]any {
 	}
 
 	dir := mirrorDir()
+	fetchParam := r.URL.Query().Get("fetch")
+	needFetch := fetchParam == "1" || (fetchParam == "auto" && fetchStale())
+
+	// mirror belum ada + diminta fetch → clone sekali agar perbandingan jalan
+	if !isRepo(dir) && (needFetch || fetchParam == "1") {
+		var log strings.Builder
+		ctx, cancel := context.WithTimeout(r.Context(), 180*time.Second)
+		defer cancel()
+		if _, err := ensureMirror(ctx, &log); err != nil {
+			st["last_error"] = "clone mirror gagal: " + err.Error()
+		}
+	}
+
 	if isRepo(dir) {
 		st["repo_dir"] = dir
 		st["repo_found"] = true
 		st["branch"] = gitBranch(dir)
-		st["current_head"] = gitHead(dir)
-		// behind dihitung dari data fetch terakhir (status tetap cepat);
-		// ?fetch=1 memicu fetch baru.
-		if r.URL.Query().Get("fetch") == "1" {
+		localHead := gitHead(dir)
+		st["current_head"] = localHead
+
+		if needFetch {
 			ctx, cancel := context.WithTimeout(r.Context(), 150*time.Second)
 			defer cancel()
 			if err := gitFetch(ctx, dir); err != nil {
 				st["last_error"] = "fetch gagal: " + err.Error()
+			} else {
+				markFetched()
 			}
 		}
+
+		branch := st["branch"].(string)
+		remoteHead := gitRemoteHead(r.Context(), dir, branch)
+		st["remote_head"] = remoteHead
+		st["remote_commit"], st["remote_subject"] = gitRemoteCommitInfo(r.Context(), dir, branch)
+
 		if n, err := gitBehind(r.Context(), dir); err == nil {
 			st["behind_commits"] = n
+			// ada pembaruan bila tertinggal commit ATAU head lokal ≠ remote
+			st["update_available"] = n > 0 || (remoteHead != "" && remoteHead != localHead)
+		} else if remoteHead != "" {
+			st["update_available"] = remoteHead != localHead
 		}
 	} else {
 		st["repo_dir"] = dir
@@ -369,6 +438,7 @@ func (a *App) handleSystemUpdate(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, result)
 			return
 		}
+		markFetched()
 		result["ok"] = true
 		result["restarted"] = true
 		result["commits"] = behind
