@@ -100,6 +100,7 @@ func (a *App) routesDashboard() {
 	// LlamaStash (FR-6.3 + FR-6.8)
 	a.mux.HandleFunc("GET /api/admin/local/status", a.requireSession(a.handleLocalStatus, store.RoleViewer, false))
 	a.mux.HandleFunc("POST /api/admin/local/install", a.requireSession(a.handleLocalInstall, store.RoleAdmin, true))
+	a.mux.HandleFunc("GET /api/admin/local/install/status", a.requireSession(a.handleLocalInstallStatus, store.RoleViewer, false))
 
 	// pembaruan aplikasi dari dashboard
 	a.mux.HandleFunc("GET /api/admin/system/update/status", a.requireSession(a.handleSystemUpdateStatus, store.RoleAdmin, false))

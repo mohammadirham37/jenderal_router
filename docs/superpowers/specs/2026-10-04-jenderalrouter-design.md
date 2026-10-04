@@ -86,3 +86,15 @@ token saver, cache respons, webhook, SSO/2FA, endpoint gambar/audio.
   auth gagal/kuota habis, format error sesuai endpoint (FR-3.4).
 - Smoke nyata: binary dijalankan, wizard setup, key dibuat, request ke provider mock
   streaming dan non-streaming diverifikasi via curl.
+
+## Addendum (2026-10-04, revisi UI)
+
+Deviasi frontend pada tabel §2 **tidak berlaku lagi** atas permintaan pemilik:
+UI dibangun ulang dengan **SvelteKit + TypeScript (adapter-static, SPA
+fallback) + ikon @lucide/svelte** sesuai rekomendasi stack PRD §8.2.
+Folder sumber: `web/`; hasil build di-embed via `internal/web/dist`
+(di-commit agar build Go murni tidak butuh Node). Tailwind/shadcn belum
+dipakai — design system CSS kustom di `web/src/app.css`.
+Fitur tambahan di luar PRD: instalasi LlamaStash dari dashboard (job asinkron
+dengan log live) dan pembaruan aplikasi dari dashboard (mirror + build +
+helper sudo sempit, opt-in).

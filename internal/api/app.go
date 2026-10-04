@@ -14,6 +14,7 @@ import (
 	"github.com/jenderal/jenderalrouter/internal/router"
 	"github.com/jenderal/jenderalrouter/internal/store"
 	"github.com/jenderal/jenderalrouter/internal/usage"
+	"github.com/jenderal/jenderalrouter/internal/web"
 )
 
 // App memegang seluruh dependensi aplikasi (store, gate, client, dst).
@@ -66,8 +67,8 @@ func (a *App) routes() {
 	// dashboard: setup wizard, sesi, admin API, playground (terdaftar di file lain)
 	a.routesDashboard()
 
-	// UI statis (embed)
-	a.mux.Handle("/", a.uiHandler())
+	// UI SvelteKit (embed, SPA)
+	a.mux.Handle("/", web.Handler())
 }
 
 // Close membersihkan resource.

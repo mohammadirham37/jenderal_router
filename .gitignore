@@ -15,3 +15,8 @@ master.key
 
 # tooling
 .zcodeignore
+
+# UI build SvelteKit (source web/ di-commit; output build/ tidak)
+web/node_modules/
+web/build/
+web/.svelte-kit/

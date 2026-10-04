@@ -307,7 +307,11 @@ Butuh Go 1.23+ (dikembangkan dengan 1.27). Tanpa CGO — silang-kompilasi mudah:
 ./scripts/build.sh v1.0.0     # vet + test + build linux amd64/arm64 → dist/
 ```
 
-UI statis (vanilla JS di `internal/api/static/`) ter-embed otomatis via `embed.FS` — satu binary, tanpa toolchain Node.
+UI dibangun dengan **SvelteKit + TypeScript + ikon Lucide** (folder `web/`,
+adapter-static SPA) lalu di-embed ke binary via `embed.FS`. Hasil build UI
+**ikut ter-commit** di `internal/web/dist`, sehingga build Go murni tidak
+membutuhkan Node; bila Node tersedia, `scripts/build.sh` otomatis membangun
+ulang UI dari `web/` terlebih dahulu.
 
 ## Arsitektur singkat
 
@@ -315,7 +319,7 @@ UI statis (vanilla JS di `internal/api/static/`) ter-embed otomatis via `embed.F
 Klien (SDK/CLI/browser)
    │  Bearer jr-…
    ▼
-Caddy (HTTPS) ──► JenderalRouter (satu binary Go)
+Caddy (HTTPS) ──► JenderalRouter (satu binary Go, UI SvelteKit ter-embed)
                    ├─ auth key + kuota (cache memori)
                    ├─ resolusi model/alias/combo
                    ├─ fallback + retry + circuit breaker

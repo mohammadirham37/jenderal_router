@@ -1,6 +1,13 @@
 # JenderalRouter — image produksi multi-arch (linux/amd64 + linux/arm64, NFR-15).
 # Build:  docker build -f deploy/Dockerfile -t jenderalrouter .
-# Build UI di-embed otomatis (internal/api/static via embed.FS).
+# UI SvelteKit di-build di stage node lalu di-embed ke binary Go.
+
+FROM --platform=$BUILDPLATFORM node:22-alpine AS ui
+WORKDIR /ui
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ .
+RUN npm run build
 
 FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 ARG TARGETARCH
@@ -10,6 +17,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+# pakai hasil build UI terbaru (menimpa dist yang ter-commit)
+COPY --from=ui /ui/build ./internal/web/dist
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags "-s -w -X github.com/jenderal/jenderalrouter/internal/api.Version=${VERSION}" \
     -o /out/jenderalrouter ./cmd/jenderalrouter
