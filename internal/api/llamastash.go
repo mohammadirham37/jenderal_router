@@ -176,8 +176,67 @@ func (j *installJob) runOutput(ctx context.Context, name string, args ...string)
 	return out, err
 }
 
-// localStatusExtra metadata tambahan untuk halaman Status LlamaStash.
-func localStatusExtra() map[string]any {
+// ---- kontrak `status --json` (diverifikasi terhadap v0.6.1) ----
+
+type llamastashStatusJSON struct {
+	Models []map[string]any `json:"models"`
+	Host   struct {
+		CPUPct      float64 `json:"cpu_pct"`
+		RAMUsed     int64   `json:"ram_used_bytes"`
+		RAMTotal    int64   `json:"ram_total_bytes"`
+		GPUMemUsed  *int64  `json:"gpu_mem_used_bytes"`
+		GPUMemTotal *int64  `json:"gpu_mem_total_bytes"`
+		GPUBackend  string  `json:"gpu_backend"`
+	} `json:"host"`
+	Daemon struct {
+		PID   int    `json:"pid"`
+		Build string `json:"build"`
+		IPC   string `json:"ipc_url"`
+	} `json:"daemon"`
+	Proxy struct {
+		Enabled bool   `json:"enabled"`
+		Listen  string `json:"listen"`
+		Status  string `json:"status"`
+		Auth    string `json:"auth"`
+		UIURL   string `json:"ui_url"`
+	} `json:"proxy"`
+}
+
+// llamastashStatusData menjalankan `llamastash status --json`.
+func llamastashStatusData(bin string) (*llamastashStatusJSON, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "status", "--json").Output()
+	if err != nil {
+		return nil, err
+	}
+	var st llamastashStatusJSON
+	if err := json.Unmarshal(out, &st); err != nil {
+		return nil, err
+	}
+	return &st, nil
+}
+
+// llamastashAPIKey mengambil bearer key proxy via CLI; "" bila keyless.
+// Loopback keyless mencetak stub "llamastash" (nilai diabaikan proxy).
+func llamastashAPIKey(bin string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "api-key").Output()
+	if err != nil {
+		return ""
+	}
+	key := strings.TrimSpace(string(out))
+	if key == "" || key == "llamastash" {
+		return ""
+	}
+	return key
+}
+
+// localStatusExtra metadata tambahan untuk halaman Status LlamaStash:
+// binary terpasang + `status --json` (proxy.listen/auth/build, host stats,
+// launch berjalan). proxyBase = Base URL provider lokal dari template.
+func localStatusExtra(proxyBase string) map[string]any {
 	bin := findLlamastashBin()
 	extra := map[string]any{
 		"installed":    bin != "",
@@ -188,12 +247,53 @@ func localStatusExtra() map[string]any {
 		if v := llamastashVersion(bin); v != "" {
 			extra["version"] = v
 		}
+		if st, err := llamastashStatusData(bin); err == nil {
+			extra["daemon_alive"] = st.Proxy.Status == "listening"
+			extra["proxy_listen"] = st.Proxy.Listen
+			extra["proxy_status"] = st.Proxy.Status
+			extra["proxy_auth"] = st.Proxy.Auth
+			extra["ui_url"] = st.Proxy.UIURL
+			extra["daemon_pid"] = st.Daemon.PID
+			extra["daemon_build"] = st.Daemon.Build
+			extra["host"] = map[string]any{
+				"cpu_pct":       round2(st.Host.CPUPct),
+				"ram_used_gb":   round2(float64(st.Host.RAMUsed) / 1e9),
+				"ram_total_gb":  round2(float64(st.Host.RAMTotal) / 1e9),
+				"gpu_backend":   st.Host.GPUBackend,
+				"gpu_mem_total": gbOrNil(st.Host.GPUMemTotal),
+			}
+			var running []string
+			for _, m := range st.Models {
+				for _, k := range []string{"name", "model", "id"} {
+					if s2, ok := m[k].(string); ok && s2 != "" {
+						running = append(running, s2)
+						break
+					}
+				}
+			}
+			extra["running_models"] = running
+			// porta proxy bisa bergeser (11435–11440) — beri tahu bila menyimpang
+			if st.Proxy.Listen != "" && proxyBase != "" && !strings.Contains(proxyBase, strings.Split(st.Proxy.Listen, ":")[1]) {
+				extra["listen_mismatch"] = true
+				extra["hint"] = "Proxy mendengarkan di " + st.Proxy.Listen +
+					" — sesuaikan Base URL provider lokal bila berbeda dari " + proxyBase
+			}
+		}
 	}
 	if inContainer() {
 		extra["hint"] = "Aplikasi berjalan di container — LlamaStash harus dipasang di HOST. " +
 			"SSH ke server lalu: curl -fsSL " + llamastashInstallURL + " | sh && llamastash init --recommended --json"
 	}
 	return extra
+}
+
+func round2(f float64) float64 { return float64(int(f*100+0.5)) / 100 }
+
+func gbOrNil(p *int64) any {
+	if p == nil {
+		return nil
+	}
+	return round2(float64(*p) / 1e9)
 }
 
 // handleLocalInstall POST /api/admin/local/install — memulai job (202).
@@ -263,7 +363,11 @@ func (a *App) handleLocalInstall(w http.ResponseWriter, r *http.Request) {
 				a.st.Audit(actorID, "local.install", "llamastash", nil, map[string]any{"ok": false, "error": "init"})
 				return
 			}
-			if key := extractBearerLike(out); key != "" {
+			key := llamastashAPIKey(bin) // kontrak resmi: `llamastash api-key`
+			if key == "" {
+				key = extractBearerLike(out) // fallback parsing output init
+			}
+			if key != "" {
 				if p, err := a.st.GetProviderByPrefix("local"); err == nil {
 					if creds, _ := a.st.ListCredentials(p.ID); len(creds) == 0 {
 						if _, err := a.st.AddCredential(p.ID, "auto", key, 1); err == nil {

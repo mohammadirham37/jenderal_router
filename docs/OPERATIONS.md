@@ -122,10 +122,45 @@ Perhatian: fallback streaming hanya terjadi **sebelum token pertama**
 - Hanya tersedia di mode binary (aplikasi di host). Di container, halaman
   menampilkan perintah instalasi host.
 - Alur: unduh installer resmi → `llamastash init --recommended --json` →
-  daftarkan provider "LlamaStash (lokal)" + sinkron model. Bearer key yang
-  terdeteksi dari output init disimpan otomatis sebagai credential.
+  daftarkan provider "LlamaStash (lokal)" + sinkron model. Bearer key
+  diambil otomatis via `llamastash api-key` (stub `llamastash` saat
+  loopback keyless — proxy mengabaikan nilainya).
 - LlamaStash berjalan sebagai user service (`jenderalrouter`), binary di
   `~/.local/bin`, data model di `/var/lib/jenderalrouter`.
+- `init --recommended` mengunduh model recommended (bisa multi-GB) — log
+  progres tampil live di dashboard.
+
+### Kontrak LlamaStash (diverifikasi terhadap v0.6.1)
+
+- **Proxy** OpenAI-compatible + Anthropic-native di `127.0.0.1:11435`
+  (default); bila porta sibuk bergeser sampai 11440 — alamat aktual
+  dilaporkan `llamastash status --json` pada `proxy.listen`, dan halaman
+  Status LlamaStash menampilkannya + peringatan bila menyimpang dari
+  Base URL provider.
+- **Rute**: `/v1/models`, `/v1/chat/completions`, `/v1/completions`,
+  `/v1/embeddings`, `/v1/rerank`, `/v1/responses`, serta `/v1/messages`
+  (Anthropic, native — Claude Code bisa langsung tunjuk). `/ui` = web UI.
+- **Auth**: loopback keyless (string apa pun berlaku). Mode LAN
+  (`--proxy-host`) WAJIB key `sk-llamastash-…` (ditolak tanpa key:
+  `refused_insecure`); key disimpan `proxy.api_key` di config, dan
+  `llamastash api-key` mencetaknya.
+- **Auto-start**: request ke model yang belum jalan otomatis memuatnya
+  (pakai params terakhir / default arsitektur); model yang sedang loading
+  ditunggu, tidak diduplikasi. Gagal load + ada model lain siap → fallback
+  dengan header `x-llamastash-served-by`.
+- **Ambigu**: nama model ambigu → `400 ambiguous_model` + daftar `matches`.
+- **CLI**: `list/start/stop/status --json` = kontrak agent; `start --json`
+  mengembalikan `{name, launch_id, port, pid, preset, path}`; `stop`
+  menerima model ref / launch id (`L3`) / port / `--all`; exit code
+  terdokumentasi (mis. 67 = gagal launch, 66 = referensi ambigu).
+- **Resource guard**: start ditolak bila RAM/VRAM kurang (mis. "needs 6.1
+  GiB but only 5.8 GiB is free") — pesan asli diteruskan ke klien.
+- **Probe**: `GET /health` selalu terbuka →
+  `{"status":"ok","models_loaded":N,"models_discovered":M}`.
+- **Porta lain**: launch server model 41100–41300 (internal, loopback);
+  mode Ollama-compat opt-in memakai 11434.
+- llama-server diluncurkan dengan `--jinja` secara default → tool calling
+  berfungsi lewat proxy maupun gateway ini.
 
 ## 7. Upgrade (manual)
 

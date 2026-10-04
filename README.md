@@ -271,9 +271,10 @@ curl -fsSL https://llamastash.dev/install.sh | sh
 llamastash init --recommended --json     # setup tanpa interaksi
 ```
 
-Di dashboard: **Provider → Dari Template → LlamaStash (lokal)**.
-Model lokal otomatis ditemukan via `GET /v1/models` proxy (fallback: CLI `llamastash list --json`).
-Konkurensi default 2 request/model, antre 30 detik, cold start hingga 120 detik (keep-alive SSE dikirim ke klien saat menunggu). Halaman **Status LlamaStash** menampilkan daemon, model, dan tombol start/stop (via CLI saat tersedia).
+Di dashboard: **Provider → Dari Template → LlamaStash (lokal)** — atau sekalian dari halaman **Status LlamaStash → Install LlamaStash** (mengunduh installer resmi, menjalankan `init --recommended --json`, mendaftarkan provider + model otomatis, dengan log progres live).
+
+Integrasi mengikuti kontrak [llamastash/llamastash](https://github.com/llamastash/llamastash) (diverifikasi terhadap v0.6.1): proxy OpenAI-compatible + Anthropic-native di `127.0.0.1:11435` (auto-start model by name, auto-fallback antar model), discovery via `GET /v1/models` + `/health`, status real-time via `llamastash status --json` (proxy.listen, auth, CPU/RAM/GPU, launch berjalan), start/stop via CLI (`start <ref> --json`), dan bearer key via `llamastash api-key` (loopback keyless — key hanya wajib pada mode LAN).
+Konkurensi default 2 request/model, antre 30 detik, cold start hingga 120 detik (keep-alive SSE dikirim ke klien saat menunggu). Halaman **Status LlamaStash** menampilkan daemon, proxy listen, statistik host, daftar model (dimuat/ditemukan), dan tombol start/stop.
 
 Panduan kapasitas: 4 vCPU/8 GB → model 1–4B Q4 · 8 vCPU/16 GB → 7–8B Q4 · GPU 24 GB → 14–32B Q4.
 Tanpa GPU, jadikan model lokal **langkah terakhir combo**.

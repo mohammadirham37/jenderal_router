@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -925,28 +926,64 @@ func (a *App) handleSystemBackup(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleLocalStatus(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{"daemon_alive": false, "models": []any{}, "url": a.cfg.LLamastashURL}
-	// probe proxy lokal
+	base := strings.TrimRight(a.cfg.LLamastashURL, "/")
+	origin := strings.TrimSuffix(base, "/v1") // endpoint /health & /v1/* hidup di origin
 	client := provider.NewClient()
-	url := strings.TrimRight(a.cfg.LLamastashURL, "/") + "/models"
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
 	var bearer string
 	if p, err := a.st.GetProviderByPrefix("local"); err == nil {
 		if creds, _ := a.st.ListCredentials(p.ID); len(creds) > 0 {
 			bearer, _ = a.st.DecryptSecret(creds[0].SecretEnc)
-			req.Header.Set("Authorization", "Bearer "+bearer)
 		}
 	}
-	start := time.Now()
-	resp, err := client.HTTP.Do(req)
-	if err == nil {
+	doGet := func(path string) (int, []byte) {
+		req, _ := http.NewRequest(http.MethodGet, origin+path, nil)
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		start := time.Now()
+		resp, err := client.HTTP.Do(req)
+		if err != nil {
+			return 0, nil
+		}
 		defer resp.Body.Close()
-		out["daemon_alive"] = resp.StatusCode < 500
-		out["latency_ms"] = time.Since(start).Milliseconds()
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if path == "/health" {
+			out["latency_ms"] = time.Since(start).Milliseconds()
+		}
+		return resp.StatusCode, data
+	}
+
+	// /health — probe resmi yang selalu terbuka: {"status","models_loaded","models_discovered"}
+	if code, data := doGet("/health"); code > 0 && code < 500 {
+		out["daemon_alive"] = true
+		var h struct {
+			Status           string `json:"status"`
+			ModelsLoaded     int    `json:"models_loaded"`
+			ModelsDiscovered int    `json:"models_discovered"`
+		}
+		if json.Unmarshal(data, &h) == nil {
+			out["models_loaded"] = h.ModelsLoaded
+			out["models_discovered"] = h.ModelsDiscovered
+		}
+	}
+
+	// /v1/models — daftar model yang ditemukan (termasuk yang belum dimuat)
+	var runningNames []string
+	if rm, ok := out["running_models"].([]string); ok {
+		runningNames = rm
+	}
+	if code, data := doGet("/v1/models"); code == 200 {
 		names := parseModelList("openai", data)
 		models := []map[string]any{}
 		for _, n := range names {
-			models = append(models, map[string]any{"name": n, "loaded": true})
+			loaded := false
+			for _, rn := range runningNames {
+				if strings.Contains(strings.ToLower(n), strings.ToLower(rn)) || strings.Contains(strings.ToLower(rn), strings.ToLower(n)) {
+					loaded = true
+					break
+				}
+			}
+			models = append(models, map[string]any{"name": n, "loaded": loaded})
 		}
 		out["models"] = models
 	}
@@ -968,7 +1005,7 @@ func (a *App) handleLocalStatus(w http.ResponseWriter, r *http.Request) {
 		out["cli_available"] = false
 	}
 	// metadata instalasi untuk tombol Install di dashboard (FR-6.8)
-	for k, v := range localStatusExtra() {
+	for k, v := range localStatusExtra(a.cfg.LLamastashURL) {
 		out[k] = v
 	}
 	writeJSON(w, 200, out)
@@ -996,9 +1033,16 @@ func (a *App) localModelToggle(w http.ResponseWriter, r *http.Request, action st
 				"' di host, atau pasang binary llamastash agar tombol ini aktif"})
 		return
 	}
-	ctx := contextWithTimeoutCLI(120 * time.Second)
-	args := []string{action, name, "--json"}
-	out, err := exec.CommandContext(ctx, path, args...).Output()
+	var out []byte
+	if action == "start" {
+		// start --json → {name, launch_id, port, pid, preset, path} (v0.6.1);
+		// load model bisa lama (probe timeout daemon 120 dtk)
+		c2 := contextWithTimeoutCLI(240 * time.Second)
+		out, err = exec.CommandContext(c2, path, "start", name, "--json").Output()
+	} else {
+		c2 := contextWithTimeoutCLI(60 * time.Second)
+		out, err = exec.CommandContext(c2, path, "stop", name).Output()
+	}
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error(), "output": string(out)})
 		return

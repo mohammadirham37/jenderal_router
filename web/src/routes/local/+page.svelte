@@ -126,10 +126,31 @@
 					<strong style="font-size:15px">LlamaStash</strong>
 					{#if status.daemon_alive}<span class="badge ok"><span class="dot pulse"></span>{t('alive')}</span>
 					{:else}<span class="badge err"><span class="dot"></span>{t('down')}</span>{/if}
+					{#if status.version}<span class="badge info">{status.version}</span>{/if}
 					{#if status.latency_ms !== undefined}<span class="muted small">{status.latency_ms} ms</span>{/if}
 				</div>
-				<div class="muted small mono" style="margin-top:4px">{status.url}</div>
-				<div class="muted small">CLI: {status.cli_available ? '✓' : '✗'}{status.installed ? ' · terpasang' : ''}</div>
+				<div class="muted small mono" style="margin-top:4px">
+					{status.proxy_listen || status.url}{#if status.proxy_auth && status.proxy_auth !== 'none'} · auth: {status.proxy_auth}{:else} · keyless loopback{/if}
+				</div>
+				<div class="muted small">
+					{#if status.daemon_build}daemon {status.daemon_build} (pid {status.daemon_pid}) · {/if}
+					CLI: {status.cli_available ? '✓' : '✗'}
+					{#if status.ui_url}· <a href={status.ui_url} target="_blank" rel="noopener">Web UI ↗</a>{/if}
+				</div>
+				{#if status.listen_mismatch}
+					<p class="small" style="color:var(--warn);margin-top:6px">⚠ {status.hint}</p>
+				{/if}
+				{#if status.host}
+					<div class="kv small muted" style="margin-top:6px">
+						<span>CPU {status.host.cpu_pct}%</span>
+						<span>RAM {status.host.ram_used_gb}/{status.host.ram_total_gb} GB</span>
+						{#if status.host.gpu_mem_total}<span>GPU ({status.host.gpu_backend}) {status.host.gpu_mem_total} GB</span>
+						{:else}<span>GPU: {status.host.gpu_backend}</span>{/if}
+					</div>
+				{/if}
+				{#if status.models_discovered !== undefined}
+					<div class="muted small">model: {status.models_loaded} dimuat / {status.models_discovered} ditemukan</div>
+				{/if}
 			</div>
 		</div>
 
