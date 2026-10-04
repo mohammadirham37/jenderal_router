@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,6 +16,11 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "-version" || os.Args[1] == "--version") {
+		fmt.Println("jenderalrouter", api.Version)
+		return
+	}
+
 	// mode healthcheck container (dipakai Dockerfile HEALTHCHECK)
 	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
 		addr := os.Getenv("JR_ADDR")

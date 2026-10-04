@@ -98,7 +98,36 @@ Perhatian: fallback streaming hanya terjadi **sebelum token pertama**
 | `ciphertext tidak valid` saat request | Master key berubah (file `master.key` dihapus/di-replace) — kembalikan master key lama |
 | `/v1/messages` ditolak Claude Code | Pastikan `ANTHROPIC_BASE_URL` tanpa `/v1` dan key di `ANTHROPIC_API_KEY` |
 
-## 7. Upgrade
+## 7. Pembaruan & LlamaStash dari dashboard
+
+### Pembaruan aplikasi (Pengaturan → Pembaruan Aplikasi)
+
+- Tombol **Cek pembaruan**: fetch origin + hitung commit ketinggalan.
+- Tombol **Perbarui sekarang** (super_admin): clone/mirror repo ke
+  `<data>/src` (milik user service), reset ke `origin/main`, build binary
+  baru, smoke test, lalu:
+  - **helper sudo aktif** (dipasang `install-ubuntu.sh binary`, jawab Y):
+    binary dipasang + service di-restart otomatis.
+  - tanpa helper: binary distage di `<data>/updates/jenderalrouter.new`
+    dan perintah pemasangan manual ditampilkan.
+- Di mode Docker: endpoint hanya menampilkan petunjuk host
+  (`git pull && docker compose up -d --build`).
+- Risiko yang perlu diketahui: helper sudo mengeksekusi binary hasil build
+  service sebagai root — kompromi pada service = kompromi penuh. Bila tidak
+  nyaman, jawab `n` saat instalasi atau hapus
+  `/etc/sudoers.d/jenderalrouter-update`.
+
+### Install LlamaStash (Status LlamaStash → Install)
+
+- Hanya tersedia di mode binary (aplikasi di host). Di container, halaman
+  menampilkan perintah instalasi host.
+- Alur: unduh installer resmi → `llamastash init --recommended --json` →
+  daftarkan provider "LlamaStash (lokal)" + sinkron model. Bearer key yang
+  terdeteksi dari output init disimpan otomatis sebagai credential.
+- LlamaStash berjalan sebagai user service (`jenderalrouter`), binary di
+  `~/.local/bin`, data model di `/var/lib/jenderalrouter`.
+
+## 7. Upgrade (manual)
 
 1. Backup DB (otomatis/manual).
 2. Ganti binary (`install -m 0755 jenderalrouter-baru /usr/local/bin/`) atau

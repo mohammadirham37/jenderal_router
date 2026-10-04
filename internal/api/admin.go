@@ -388,9 +388,9 @@ func parseModelList(ptype string, data []byte) []string {
 
 // llamastashCLIModels memanggil `llamastash list --json` bila binary ada.
 func llamastashCLIModels() ([]string, error) {
-	path, err := exec.LookPath("llamastash")
-	if err != nil {
-		return nil, fmt.Errorf("binary llamastash tidak ada di PATH")
+	path := findLlamastashBin()
+	if path == "" {
+		return nil, fmt.Errorf("binary llamastash tidak ditemukan")
 	}
 	ctx := contextWithTimeoutCLI(10 * time.Second)
 	out, err := exec.CommandContext(ctx, path, "list", "--json").Output()
@@ -966,6 +966,10 @@ func (a *App) handleLocalStatus(w http.ResponseWriter, r *http.Request) {
 		out["models"] = existing
 	} else {
 		out["cli_available"] = false
+	}
+	// metadata instalasi untuk tombol Install di dashboard (FR-6.8)
+	for k, v := range localStatusExtra() {
+		out[k] = v
 	}
 	writeJSON(w, 200, out)
 }

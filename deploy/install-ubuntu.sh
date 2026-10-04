@@ -128,6 +128,54 @@ ENV
       chmod 600 /etc/default/jenderalrouter
     fi
 
+    # ---- helper pembaruan dari dashboard (opt-in) ----
+    # Service (user jenderalrouter) bisa git pull + build sendiri; yang butuh
+    # root hanya memasang binary hasil build + restart service — diberikan
+    # lewat helper root yang SEMPIT dengan sudoers NOPASSWD terbatas.
+    read -r -p "Aktifkan tombol 'Perbarui' dari dashboard (sudo terbatas untuk helper ini)? [Y/n]: " ANS_UPDATE || ANS_UPDATE="Y"
+    ANS_UPDATE="${ANS_UPDATE:-Y}"
+    if [[ ! "$ANS_UPDATE" =~ ^[Nn] ]]; then
+      install -d -m 0755 /usr/local/lib/jenderalrouter
+      cat > /usr/local/lib/jenderalrouter/apply-update.sh <<'APPLY'
+#!/bin/bash
+# Helper pembaruan JenderalRouter — dipanggil service via sudo NOPASSWD.
+# Sengaja sempit: hanya memasang binary hasil build service (yang sudah
+# lolos smoke test) dan me-restart service ini.
+# CATATAN RISIKO: binary distage oleh user service lalu dieksekusi root.
+# Bila tidak menerimanya, hapus /etc/sudoers.d/jenderalrouter-update.
+set -euo pipefail
+STAGE=/var/lib/jenderalrouter/updates/jenderalrouter.new
+case "${1:-}" in
+  check)
+    exit 0
+    ;;
+  install)
+    [ -f "$STAGE" ]
+    /usr/bin/systemctl stop jenderalrouter || true
+    /usr/bin/install -m 0755 "$STAGE" /usr/local/bin/jenderalrouter
+    rm -f "$STAGE"
+    /usr/bin/systemctl start jenderalrouter
+    ;;
+  *)
+    exit 2
+    ;;
+esac
+APPLY
+      chown root:root /usr/local/lib/jenderalrouter/apply-update.sh
+      chmod 0755 /usr/local/lib/jenderalrouter/apply-update.sh
+      {
+        echo "jenderalrouter ALL=(root) NOPASSWD: /usr/local/lib/jenderalrouter/apply-update.sh check"
+        echo "jenderalrouter ALL=(root) NOPASSWD: /usr/local/lib/jenderalrouter/apply-update.sh install"
+      } > /etc/sudoers.d/jenderalrouter-update
+      if visudo -cf /etc/sudoers.d/jenderalrouter-update >/dev/null; then
+        chmod 0440 /etc/sudoers.d/jenderalrouter-update
+        echo ">> Helper pembaruan dashboard aktif (sudoers tervalidasi)."
+      else
+        echo "!! sudoers tidak valid — helper tidak diaktifkan." >&2
+        rm -f /etc/sudoers.d/jenderalrouter-update
+      fi
+    fi
+
     setup_firewall
 
     systemctl daemon-reload

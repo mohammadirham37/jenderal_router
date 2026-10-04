@@ -506,6 +506,78 @@
     ]);
     main.appendChild(backupCard);
 
+    // ---- Pembaruan Aplikasi (git pull + rebuild + restart dari dashboard) ----
+    const updCard = el('div', { class: 'card', style: 'margin-top:14px' }, [el('h2', {}, ['Pembaruan Aplikasi'])]);
+    main.appendChild(updCard);
+    const updInfo = el('div', { class: 'small' });
+    const updLog = el('pre', { class: 'mono small hidden', style: 'background:var(--bg);padding:10px;border-radius:8px;white-space:pre-wrap;max-height:260px;overflow-y:auto' });
+    const btnCheck = el('button', { class: 'btn ghost' }, ['Cek pembaruan']);
+    const btnUpdate = el('button', { class: 'btn' }, ['Perbarui sekarang']);
+    updCard.appendChild(el('div', { class: 'kv', style: 'margin:8px 0' }, [btnCheck, btnUpdate]));
+    updCard.appendChild(updInfo);
+    updCard.appendChild(updLog);
+
+    async function loadUpdateStatus(fetchNew) {
+      try {
+        const st = await API.get('/api/admin/system/update/status' + (fetchNew ? '?fetch=1' : ''));
+        updInfo.innerHTML = '';
+        const rows = [
+          ['Versi terpasang', st.version],
+          ['Mode', st.mode],
+        ];
+        if (st.hint) rows.push(['Info', st.hint]);
+        if (!st.in_container) {
+          rows.push(['Repo (mirror)', st.repo_found ? (st.repo_dir + ' @ ' + (st.current_head || '') + ' [' + (st.branch || '') + ']') : 'belum di-clone (otomatis saat update)']);
+          rows.push(['Ketinggalan commit', st.behind_commits !== undefined ? String(st.behind_commits) : '—']);
+          rows.push(['git', st.git_available ? '✓' : '✗']);
+          rows.push(['Go', st.go_available ? '✓' : '✗']);
+          rows.push(['Restart otomatis (sudo helper)', st.sudo_apply_available ? '✓' : '✗ (binary akan distage; perintah pemasangan ditampilkan)']);
+          if (st.staged_binary) rows.push(['Binary ter-stage', 'ada — siap dipasang']);
+          if (st.last_update) rows.push(['Update terakhir', st.last_update.time + ' (' + st.last_update.commits + ' commit)']);
+        }
+        for (const [k, v] of rows) {
+          updInfo.appendChild(el('div', { style: 'border-bottom:1px solid var(--border);padding:3px 0' }, [
+            el('span', { class: 'muted', style: 'display:inline-block;min-width:220px' }, [k + ':']),
+            el('span', { class: 'mono' }, [String(v === undefined ? '—' : v)]),
+          ]));
+        }
+        return st;
+      } catch (e) { toast(e.message, 'err'); }
+    }
+    btnCheck.addEventListener('click', async () => {
+      btnCheck.disabled = true; btnCheck.textContent = 'Memeriksa…';
+      await loadUpdateStatus(true);
+      btnCheck.disabled = false; btnCheck.textContent = 'Cek pembaruan';
+    });
+    btnUpdate.addEventListener('click', async () => {
+      if (!confirm('Perbarui aplikasi sekarang?\nBuild bisa 2–5 menit; bila helper sudo aktif, service akan di-restart otomatis.')) return;
+      btnUpdate.disabled = true; btnUpdate.textContent = 'Memperbarui…';
+      updLog.classList.remove('hidden');
+      updLog.textContent = '⏳ fetch + build… (jangan tutup halaman ini)';
+      let res = null;
+      try {
+        res = await API.post('/api/admin/system/update', {});
+        updLog.textContent = res.log || '';
+        if (res.error) toast(res.error, 'err');
+      } catch (e) {
+        // service mungkin sedang restart — jangan panik, poll status
+        updLog.textContent += '\n(koneksi terputus — kemungkinan service sedang restart, memeriksa status…)';
+      }
+      // poll status hingga versi berubah / stabil
+      const before = (await loadUpdateStatus(false)) || {};
+      for (let i = 0; i < 12; i++) {
+        await new Promise(r2 => setTimeout(r2, 3000));
+        try {
+          const st = await API.get('/api/admin/system/update/status');
+          if (!st.busy) { updLog.textContent += '\nversi sekarang: ' + st.version; break; }
+        } catch (e) { /* tunggu lagi */ }
+      }
+      toast('Proses pembaruan selesai', 'ok');
+      btnUpdate.disabled = false; btnUpdate.textContent = 'Perbarui sekarang';
+      loadUpdateStatus(false);
+    });
+    loadUpdateStatus(false);
+
     const auditCard = el('div', { class: 'card', style: 'margin-top:14px' }, [el('h2', {}, [t('audit_log')])]);
     const audit = await API.get('/api/admin/audit?limit=30');
     const list = el('div', {}, (audit.audit || []).map((a) => el('div', { class: 'kv small', style: 'border-bottom:1px solid var(--border);padding:4px 0' }, [
@@ -526,6 +598,46 @@
       card.innerHTML = '';
       let s;
       try { s = await API.get('/api/admin/local/status'); } catch (e) { toast(e.message, 'err'); return; }
+
+      // kartu instalasi (FR-6.8)
+      const installCard = el('div', { class: 'card', style: 'margin-bottom:14px' });
+      installCard.appendChild(el('h2', {}, ['Install LlamaStash']));
+      if (s.installed) {
+        installCard.appendChild(el('div', { class: 'kv', style: 'align-items:center' }, [
+          badge('terpasang', 'ok'),
+          s.version ? el('span', { class: 'muted small' }, [s.version]) : null,
+          el('span', { class: 'muted small mono' }, [s.bin || '']),
+        ]));
+        if (s.version) card.appendChild(installCard);
+      } else if (s.in_container) {
+        installCard.appendChild(el('p', { class: 'muted small' }, [s.hint || '']));
+        card.appendChild(installCard);
+      } else {
+        installCard.appendChild(el('p', { class: 'muted small' },
+          ['Belum terpasang. Tombol ini akan mengunduh installer resmi, menjalankan ', 
+           el('code', {}, ['llamastash init --recommended --json']),
+           ', lalu mendaftarkan provider lokal + modelnya secara otomatis.']));
+        const logPre = el('pre', { class: 'mono small hidden', style: 'background:var(--bg);padding:10px;border-radius:8px;white-space:pre-wrap;max-height:220px;overflow-y:auto' });
+        const btn = el('button', { class: 'btn', onclick: async () => {
+          if (!confirm('Install LlamaStash di server ini sekarang?')) return;
+          btn.disabled = true; btn.textContent = 'Menginstall… (bisa beberapa menit)';
+          logPre.classList.remove('hidden'); logPre.textContent = '⏳ sedang berjalan…';
+          try {
+            const res = await API.post('/api/admin/local/install', {});
+            logPre.textContent = res.log || JSON.stringify(res, null, 2);
+            toast(res.ok ? 'LlamaStash terpasang ✓' : (res.error || 'gagal'), res.ok ? 'ok' : 'err');
+          } catch (e) {
+            logPre.textContent = '✗ ' + e.message;
+            toast(e.message, 'err');
+          }
+          btn.disabled = false; btn.textContent = 'Install LlamaStash';
+          setTimeout(reload, 1500);
+        } }, ['Install LlamaStash']);
+        installCard.appendChild(el('div', { style: 'margin:8px 0' }, [btn]));
+        installCard.appendChild(logPre);
+        card.appendChild(installCard);
+      }
+
       card.appendChild(el('div', { class: 'page-head' }, [
         el('div', {}, [
           el('strong', {}, ['LlamaStash']), ' ',
