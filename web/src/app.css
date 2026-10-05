@@ -191,7 +191,7 @@ h1.page-title :global(svg) { color: var(--accent); }
 }
 
 @media (min-width: 901px) {
-	.backdrop { display: none; }
+	.topbar, .backdrop { display: none; }
 }
 
 /* ---- komponen ---- */
