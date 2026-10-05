@@ -109,6 +109,16 @@
 		if (!text || sending) return;
 		sending = true;
 		input = '';
+		// percakapan baru bila belum ada yang terpilih — wajib sebelum push pesan
+		if (!current) {
+			try {
+				await newConversation();
+			} catch (e: any) {
+				toast('buat percakapan gagal: ' + e.message, 'err');
+				sending = false;
+				return;
+			}
+		}
 		msgs.push({ role: 'user', content: text });
 		msgs = [...msgs];
 
@@ -222,6 +232,16 @@
 			const last = msgs[msgs.length - 1];
 			if (last && last.role === 'assistant') last.content += '\n\n**⚠ ' + e.message + '**';
 			else toast(e.message, 'err');
+			// simpan best-effort: user + jawaban parsial agar tidak hilang saat refresh
+			if (current) {
+				try {
+					await api.post(`/api/me/conversations/${current}/messages`, { role: 'user', content: text });
+					const la = [...msgs].reverse().find((m) => m.role === 'assistant');
+					await api.post(`/api/me/conversations/${current}/messages`, {
+						role: 'assistant', content: la?.content || '', model: la?.model || model
+					});
+				} catch { /* */ }
+			}
 			msgs = [...msgs];
 		} finally {
 			const dur = Math.round((performance.now() - started) / 100) / 10;
