@@ -141,12 +141,13 @@ func (u Usage) Total() int { return u.PromptTokens + u.CompletionTokens }
 
 // ChatResponse adalah respons non-streaming ternormalisasi.
 type ChatResponse struct {
-	ID           string     `json:"id"`
-	Model        string     `json:"model"`
-	Content      string     `json:"content"`
+	ID           string `json:"id"`
+	Model        string `json:"model"`
+	Content      string `json:"content"`
+	Reasoning    string `json:"reasoning,omitempty"` // reasoning_content (model thinking)
 	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
-	FinishReason string     `json:"finish_reason"`
-	Usage        Usage      `json:"usage"`
+	FinishReason string `json:"finish_reason"`
+	Usage        Usage  `json:"usage"`
 }
 
 // IsEmpty mendeteksi error konten kosong (pemicu fallback, FR-2.2).
@@ -201,6 +202,7 @@ func (e *UpstreamError) Retryable() bool {
 type StreamDelta struct {
 	Role         string          `json:"role,omitempty"`
 	Text         string          `json:"text,omitempty"`
+	Reasoning    string          `json:"reasoning,omitempty"` // reasoning_content (model thinking)
 	ToolCalls    []ToolCallDelta `json:"tool_calls,omitempty"`
 	FinishReason string          `json:"finish_reason,omitempty"`
 }

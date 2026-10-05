@@ -187,6 +187,8 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 
 	id := genChunkID()
 	var content strings.Builder
+	var reasoning strings.Builder
+	servedModel := ""
 	tokensIn, tokensOut := 0, 0
 	if internal.Stream {
 		first := true
@@ -195,11 +197,18 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				break
 			}
+			if e.Model != "" {
+				servedModel = e.Model
+			}
 			switch e.Type {
 			case translate.EventDelta:
 				if first {
 					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, map[string]any{"role": "assistant", "content": ""}))
 					first = false
+				}
+				if e.Delta.Reasoning != "" {
+					reasoning.WriteString(e.Delta.Reasoning)
+					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, map[string]any{"reasoning_content": e.Delta.Reasoning}))
 				}
 				if e.Delta.Text != "" {
 					content.WriteString(e.Delta.Text)
@@ -220,11 +229,18 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 			rec.TokensEstimated = true
 		}
 		rec.TokensIn, rec.TokensOut = tokensIn, tokensOut
-		fmt.Fprintf(w, "data: %s\n\n", jsonCompact(map[string]any{
+		meta := map[string]any{
 			"id": id, "choices": []any{}, "usage": map[string]any{
 				"prompt_tokens": tokensIn, "completion_tokens": tokensOut, "total_tokens": tokensIn + tokensOut,
 			},
-		}))
+		}
+		if servedModel != "" {
+			meta["served_model"] = servedModel
+		}
+		if reasoning.Len() > 0 {
+			meta["reasoning_content"] = reasoning.String()
+		}
+		fmt.Fprintf(w, "data: %s\n\n", jsonCompact(meta))
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		if flusher != nil {
 			flusher.Flush()
@@ -239,7 +255,14 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 			rec.TokensEstimated = true
 		}
 		rec.TokensIn, rec.TokensOut = tokensIn, tokensOut
-		fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, map[string]any{"content": resp.Content}))
+		chunk := map[string]any{"content": resp.Content}
+		if resp.Reasoning != "" {
+			chunk["reasoning_content"] = resp.Reasoning
+		}
+		if servedModel != "" {
+			chunk["served_model"] = servedModel
+		}
+		fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, chunk))
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		if flusher != nil {
 			flusher.Flush()

@@ -3,7 +3,10 @@
 	import { api, md } from '$lib/api';
 	import { t, toast } from '$lib/stores.svelte';
 
-	type Msg = { role: 'user' | 'assistant'; content: string; provider?: string };
+	type Msg = {
+		role: 'user' | 'assistant'; content: string; provider?: string;
+		reasoning?: string; model?: string; ms?: number;
+	};
 
 	let models = $state<any[]>([]);
 	let model = $state('');
@@ -60,7 +63,10 @@
 		current = id;
 		try {
 			const res = await api.get('/api/me/conversations/' + id);
-			msgs = (res.messages || []).map((m: any) => ({ role: m.role, content: m.content, provider: m.provider_name }));
+			msgs = (res.messages || []).map((m: any) => ({
+				role: m.role, content: m.content, provider: m.provider_name,
+				model: m.model || undefined
+			}));
 			scrollBottom();
 		} catch (e: any) { toast(e.message, 'err'); }
 	}
@@ -94,6 +100,7 @@
 		msgs.push({ role: 'assistant', content: '' });
 		const bubble = msgs[msgs.length - 1];
 		scrollBottom();
+		const started = performance.now();
 
 		try {
 			(globalThis as any).__deltas = 0;
@@ -105,11 +112,23 @@
 					msgs = [...msgs]; // paksa reaktivitas array
 					scrollBottom();
 				},
-				() => loadQuota()
+				() => loadQuota(),
+				(extra) => {
+					// reasoning model thinking + model yang benar-benar melayani
+					if (extra.reasoning) {
+						bubble.reasoning = (bubble.reasoning ?? '') + extra.reasoning;
+						msgs = [...msgs];
+						scrollBottom();
+					}
+					if (extra.model) {
+						bubble.model = extra.model.split('/').pop()?.replace(/\.gguf$/i, '') || extra.model;
+					}
+				}
 			);
-			if (!bubble.content) bubble.content = '(kosong)';
+			bubble.ms = Math.round((performance.now() - started) / 100) / 10;
+			if (!bubble.content && !bubble.reasoning) bubble.content = '(kosong)';
 			await api.post(`/api/me/conversations/${current}/messages`, { role: 'user', content: text });
-			await api.post(`/api/me/conversations/${current}/messages`, { role: 'assistant', content: bubble.content, model });
+			await api.post(`/api/me/conversations/${current}/messages`, { role: 'assistant', content: bubble.content, model: bubble.model || model });
 			loadQuota();
 			loadConversations();
 		} catch (e: any) {
@@ -172,10 +191,20 @@
 					{#if m.role === 'assistant'}
 						<div class="row" style="margin-bottom:4px;color:var(--muted);font-size:11px"><Bot size={12} /> assistant</div>
 					{/if}
+					{#if m.role === 'assistant' && m.reasoning}
+						<details class="think" open={sending && !m.content}>
+							<summary>💡 Thinking</summary>
+							<div class="think-body">{m.reasoning}</div>
+						</details>
+					{/if}
 					<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 					{@html md(m.content)}
-					{#if m.provider}
-						<div class="meta"><Sparkles size={11} /> {t('answered_by')}: {m.provider}</div>
+					{#if m.role === 'assistant' && (m.provider || m.model || m.ms)}
+						<div class="meta">
+							{#if m.model}<span title="model yang melayani jawaban ini"><Bot size={11} /> {m.model}</span>{/if}
+							{#if m.ms}<span title="durasi streaming jawaban"><span class="dot"></span> {m.ms.toLocaleString('id-ID')} dtk</span>{/if}
+							{#if m.provider}<span><Sparkles size={11} /> {t('answered_by')}: {m.provider}</span>{/if}
+						</div>
 					{/if}
 				</div>
 			{/each}
@@ -195,3 +224,31 @@
 		</div>
 	</div>
 </div>
+
+<style>
+	.think {
+		margin: 2px 0 8px;
+		border: 1px dashed var(--border-strong);
+		border-radius: 10px;
+		overflow: hidden;
+		font-size: 12.5px;
+	}
+	.think summary {
+		cursor: pointer;
+		padding: 6px 10px;
+		color: var(--muted);
+		font-weight: 700;
+		user-select: none;
+		background: var(--surface-2);
+	}
+	.think summary:hover { color: var(--text); }
+	.think-body {
+		padding: 8px 12px;
+		white-space: pre-wrap;
+		color: var(--muted);
+		max-height: 260px;
+		overflow-y: auto;
+		line-height: 1.55;
+	}
+	.msg.assistant .think { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+</style>

@@ -323,9 +323,10 @@ type wireOpenAIResponse struct {
 	Choices []struct {
 		Index   int `json:"index"`
 		Message struct {
-			Role      string               `json:"role"`
-			Content   json.RawMessage      `json:"content"`
-			ToolCalls []wireOpenAIToolCall `json:"tool_calls,omitempty"`
+			Role             string               `json:"role"`
+			Content          json.RawMessage      `json:"content"`
+			ReasoningContent *string              `json:"reasoning_content,omitempty"`
+			ToolCalls        []wireOpenAIToolCall `json:"tool_calls,omitempty"`
 		} `json:"message"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
@@ -367,6 +368,9 @@ func ParseOpenAIResponse(body []byte) (*ChatResponse, error) {
 			if p.Type == PartText {
 				resp.Content += p.Text
 			}
+		}
+		if c.Message.ReasoningContent != nil {
+			resp.Reasoning = *c.Message.ReasoningContent
 		}
 		for _, tc := range c.Message.ToolCalls {
 			resp.ToolCalls = append(resp.ToolCalls, ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: tc.Function.Arguments})
@@ -446,9 +450,10 @@ type wireOpenAIChunk struct {
 	Choices []struct {
 		Index int `json:"index"`
 		Delta struct {
-			Role      string               `json:"role,omitempty"`
-			Content   json.RawMessage      `json:"content,omitempty"`
-			ToolCalls []wireOpenAIToolCall `json:"tool_calls,omitempty"`
+			Role             string               `json:"role,omitempty"`
+			Content          json.RawMessage      `json:"content,omitempty"`
+			ReasoningContent *string              `json:"reasoning_content,omitempty"`
+			ToolCalls        []wireOpenAIToolCall `json:"tool_calls,omitempty"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
@@ -487,6 +492,9 @@ func ParseOpenAISSEChunk(data []byte) ([]Event, error) {
 				}
 			}
 		}
+		if c.Delta.ReasoningContent != nil && *c.Delta.ReasoningContent != "" {
+			delta.Reasoning = *c.Delta.ReasoningContent
+		}
 		for _, tc := range c.Delta.ToolCalls {
 			idx := 0
 			if tc.Index != nil {
@@ -496,7 +504,7 @@ func ParseOpenAISSEChunk(data []byte) ([]Event, error) {
 				Index: idx, ID: tc.ID, Name: tc.Function.Name, Arguments: tc.Function.Arguments,
 			})
 		}
-		if c.Delta.Role != "" || delta.Text != "" || len(delta.ToolCalls) > 0 {
+		if c.Delta.Role != "" || delta.Text != "" || delta.Reasoning != "" || len(delta.ToolCalls) > 0 {
 			events = append(events, Event{Type: EventDelta, Delta: delta, ID: w.ID, Model: w.Model})
 		}
 		if c.FinishReason != nil && *c.FinishReason != "" {

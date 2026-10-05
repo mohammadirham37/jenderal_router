@@ -63,7 +63,8 @@ export const api = {
 	async chatStream(
 		opts: { model: string; messages: { role: string; content: string }[]; temperature?: number; maxTokens?: number; signal?: AbortSignal },
 		onDelta: (text: string) => void,
-		onMeta?: (usage: any) => void
+		onMeta?: (usage: any) => void,
+		onExtra?: (e: { reasoning?: string; model?: string }) => void
 	) {
 		const res = await fetch('/api/me/chat', {
 			method: 'POST',
@@ -95,7 +96,10 @@ export const api = {
 						const j = JSON.parse(payload);
 						if (j.error) throw new Error(j.error.message || 'upstream error');
 						const delta = j.choices?.[0]?.delta;
+						if (delta?.reasoning_content && onExtra) onExtra({ reasoning: delta.reasoning_content });
 						if (delta?.content) onDelta(delta.content);
+						if (j.reasoning_content && onExtra) onExtra({ reasoning: j.reasoning_content });
+						if (j.served_model && onExtra) onExtra({ model: j.served_model });
 						if (j.usage && onMeta) onMeta(j.usage);
 					} catch (e: any) {
 						if (e.message && !/JSON/.test(e.message)) throw e;
