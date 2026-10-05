@@ -85,6 +85,7 @@ func (a *App) Close() {
 func (a *App) RunBackground(ctx context.Context) {
 	stop := make(chan struct{})
 	go usage.ResetWorker(a.st, a.cfg.TZ, stop)
+	go a.statsWorker(ctx) // statistik sistem live untuk dashboard
 
 	purge := time.NewTicker(10 * time.Minute)
 	backup := time.NewTicker(time.Hour)
