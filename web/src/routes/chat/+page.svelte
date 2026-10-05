@@ -1,12 +1,15 @@
 <script lang="ts">
-	import { MessageSquare, Plus, Send, Trash2, X, Bot, Sparkles } from '@lucide/svelte';
-	import { api, md } from '$lib/api';
+	import { Plus, Send, Trash2, X, Bot, Sparkles, History, Globe } from '@lucide/svelte';
+	import { api, md, fmtTs } from '$lib/api';
 	import { t, toast } from '$lib/stores.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 
 	type Msg = {
-		role: 'user' | 'assistant'; content: string; provider?: string;
+		role: 'user' | 'assistant' | 'tool'; content: string; provider?: string;
 		reasoning?: string; model?: string; ms?: number;
+		tools?: { name: string; args: string; url?: string }[];
 	};
+	type ToolCall = { id: string; name: string; args: string };
 
 	let models = $state<any[]>([]);
 	let model = $state('');
@@ -17,6 +20,24 @@
 	let sending = $state(false);
 	let quota = $state<any>(null);
 	let msgsEl = $state<HTMLElement | null>(null);
+	let showHistory = $state(false);
+
+	// tool bawaan: web_fetch — dieksekusi sisi server (guard SSRF aktif)
+	const TOOLS = [{
+		type: 'function',
+		function: {
+			name: 'web_fetch',
+			description: 'Mengambil isi sebuah halaman web publik. Gunakan saat pengguna menyebutkan URL/link atau membutuhkan informasi terkini dari web.',
+			parameters: {
+				type: 'object',
+				properties: {
+					url: { type: 'string', description: 'URL lengkap halaman, mulai dengan http atau https' }
+				},
+				required: ['url']
+			}
+		}
+	}];
+	const MAX_TOOL_ROUNDS = 4;
 
 	$effect(() => {
 		(async () => {
@@ -57,6 +78,7 @@
 		const res = await api.post('/api/me/conversations', { title: t('new_chat'), model });
 		current = res.conversation.id;
 		msgs = [];
+		showHistory = false;
 		loadConversations();
 	}
 	async function openConversation(id: number) {
@@ -67,6 +89,7 @@
 				role: m.role, content: m.content, provider: m.provider_name,
 				model: m.model || undefined
 			}));
+			showHistory = false;
 			scrollBottom();
 		} catch (e: any) { toast(e.message, 'err'); }
 	}
@@ -85,55 +108,125 @@
 		const text = input.trim();
 		if (!text || sending) return;
 		sending = true;
-		try {
-			if (!current) await newConversation();
-		} catch (e: any) {
-			toast('buat percakapan gagal: ' + e.message, 'err');
-			sending = false;
-			return;
-		}
 		input = '';
 		msgs.push({ role: 'user', content: text });
-		const history = msgs.map((m) => ({ role: m.role, content: m.content }));
-		// ambil referensi PROXY dari array $state — memutasi objek mentah
-		// tidak memicu reaktivitas Svelte 5
-		msgs.push({ role: 'assistant', content: '' });
-		const bubble = msgs[msgs.length - 1];
-		scrollBottom();
+		msgs = [...msgs];
+
+		// riwayat awal: semua pesan yang sudah ada (tanpa bubble kosong)
+		const history: any[] = [];
+		for (const m of msgs) {
+			if (m.role === 'user') history.push({ role: 'user', content: m.content });
+			else if (m.role === 'assistant' && m.content) history.push({ role: 'assistant', content: m.content });
+		}
+
 		const started = performance.now();
+		let quotaSeen = false;
 
 		try {
-			(globalThis as any).__deltas = 0;
-			(globalThis as any).__deltaText = '';
-			await api.chatStream(
-				{ model, messages: history },
-				(delta) => {
-					bubble.content += delta;
-					msgs = [...msgs]; // paksa reaktivitas array
-					scrollBottom();
-				},
-				() => loadQuota(),
-				(extra) => {
-					// reasoning model thinking + model yang benar-benar melayani
-					if (extra.reasoning) {
-						bubble.reasoning = (bubble.reasoning ?? '') + extra.reasoning;
+			// loop tool-calling: maksimal N ronde web_fetch
+			for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+				msgs.push({ role: 'assistant', content: '' });
+				const bubble = msgs[msgs.length - 1];
+				msgs = [...msgs];
+				scrollBottom();
+
+				let finish = '';
+				const pending: Record<number, ToolCall> = {};
+
+				await api.chatStream(
+					{ model, messages: history, tools: TOOLS },
+					(delta) => {
+						bubble.content += delta;
 						msgs = [...msgs];
 						scrollBottom();
+					},
+					() => {
+						if (!quotaSeen) { quotaSeen = true; loadQuota(); }
+					},
+					(extra) => {
+						if (extra.reasoning) {
+							bubble.reasoning = (bubble.reasoning ?? '') + extra.reasoning;
+							msgs = [...msgs];
+							scrollBottom();
+						}
+						if (extra.model) {
+							bubble.model = extra.model.split('/').pop()?.replace(/\.gguf$/i, '') || extra.model;
+						}
+					},
+					(chunk) => {
+						const d = chunk.choices?.[0]?.delta;
+						if (d?.tool_calls) {
+							for (const tc of d.tool_calls) {
+								const idx = tc.index ?? 0;
+								pending[idx] ??= { id: '', name: '', args: '' };
+								if (tc.id) pending[idx].id = tc.id;
+								if (tc.function?.name) pending[idx].name += tc.function.name;
+								if (tc.function?.arguments) pending[idx].args += tc.function.arguments;
+							}
+							msgs = [...msgs];
+						}
+						if (d?.finish_reason) finish = d.finish_reason;
 					}
-					if (extra.model) {
-						bubble.model = extra.model.split('/').pop()?.replace(/\.gguf$/i, '') || extra.model;
+				);
+
+				const calls = Object.values(pending).filter((t) => t.name);
+				if (finish !== 'tool_calls' || calls.length === 0) break; // jawaban selesai
+
+				// model meminta tool → jalankan di server lalu lanjutkan
+				bubble.tools = (bubble.tools ?? []).concat(
+					calls.map((t) => {
+						let u = '';
+						try { u = JSON.parse(t.args || '{}').url || ''; } catch { /* */ }
+						return { name: t.name, args: t.args, url: u };
+					})
+				);
+				msgs = [...msgs];
+				history.push({
+					role: 'assistant',
+					content: bubble.content || null,
+					tool_calls: calls.map((t) => ({
+						id: t.id, type: 'function', function: { name: t.name, arguments: t.args }
+					}))
+				});
+
+				for (const t of calls) {
+					let result = '';
+					const meta = bubble.tools?.[bubble.tools.length - 1];
+					if (t.name === 'web_fetch') {
+						let url = '';
+						try { url = JSON.parse(t.args || '{}').url || ''; } catch { /* */ }
+						try {
+							const r = await api.post('/api/me/tools/webfetch', { url });
+							result = 'Judul: ' + (r.title || '-') + '\n' + r.text;
+						} catch (e: any) {
+							result = 'ERROR: ' + e.message;
+						}
+						if (meta) meta.url = url;
+					} else {
+						result = 'ERROR: tool "' + t.name + '" tidak dikenal';
 					}
+					history.push({ role: 'tool', tool_call_id: t.id, content: result });
 				}
-			);
-			bubble.ms = Math.round((performance.now() - started) / 100) / 10;
-			if (!bubble.content && !bubble.reasoning) bubble.content = '(kosong)';
+				msgs = [...msgs];
+				scrollBottom();
+			}
+
 			await api.post(`/api/me/conversations/${current}/messages`, { role: 'user', content: text });
-			await api.post(`/api/me/conversations/${current}/messages`, { role: 'assistant', content: bubble.content, model: bubble.model || model });
+			const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
+			await api.post(`/api/me/conversations/${current}/messages`, {
+				role: 'assistant', content: lastAssistant?.content || '', model: lastAssistant?.model || model
+			});
 			loadQuota();
 			loadConversations();
 		} catch (e: any) {
-			bubble.content += `\n\n**⚠ ${e.message}**`;
+			const last = msgs[msgs.length - 1];
+			if (last && last.role === 'assistant') last.content += '\n\n**⚠ ' + e.message + '**';
+			else toast(e.message, 'err');
+			msgs = [...msgs];
 		} finally {
+			const dur = Math.round((performance.now() - started) / 100) / 10;
+			for (const m of msgs) if (m.role === 'assistant' && !m.ms) m.ms = dur;
+			msgs = [...msgs];
 			sending = false;
 			scrollBottom();
 		}
@@ -142,48 +235,30 @@
 
 <svelte:head><title>{t('chat')} — JenderalRouter</title></svelte:head>
 
-<div class="page-head">
-	<h1 class="page-title"><MessageSquare size={20} /> {t('chat')}</h1>
-	<div class="row" style="max-width:320px;width:100%">
-		<select bind:value={model} class="grow">
+<div class="chat-page">
+	<div class="chat-toolbar">
+		<button class="btn ghost sm" onclick={() => (showHistory = true)}>
+			<History size={14} /> {t('history')}
+		</button>
+		<button class="btn sm" onclick={newConversation}><Plus size={14} /> {t('new_chat')}</button>
+		<select bind:value={model} class="grow model-select">
 			{#each models as m (m.id)}
 				<option value={m.id}>{m.id}{m.local ? ' · lokal' : ''}</option>
 			{/each}
 		</select>
-	</div>
-</div>
-
-<div class="chat-layout">
-	<div class="card" style="display:flex;flex-direction:column">
-		<button class="btn" style="width:100%;margin-bottom:10px" onclick={newConversation}>
-			<Plus size={15} /> {t('new_chat')}
-		</button>
-		<div style="overflow-y:auto;max-height:42vh">
-			{#each conversations as c (c.id)}
-				<div class="conv-item {current === c.id ? 'active' : ''}" onclick={() => openConversation(c.id)} onkeydown={(e) => e.key === 'Enter' && openConversation(c.id)} role="button" tabindex="0">
-					<span class="small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{c.title || '…'}</span>
-					<button class="icon-btn" style="width:22px;height:22px" onclick={(e) => { e.stopPropagation(); delConversation(c.id); }}>
-						<X size={12} />
-					</button>
-				</div>
-			{/each}
-		</div>
-		<div class="muted small" style="margin-top:auto;border-top:1px solid var(--border);padding-top:10px">
-			<div style="font-weight:700;margin-bottom:4px">{t('quota_left')}</div>
-			{#each quota?.quotas ?? [] as q (q.period)}
-				<div class="mono">{q.period}: {q.used_tokens}/{q.token_limit}</div>
-			{/each}
-			{#if quota?.today}
-				<div class="muted" style="margin-top:4px">{t('requests')}: {quota.today.requests}</div>
-			{/if}
-		</div>
+		<span class="badge info tool-badge" title="Model bisa memanggil web_fetch untuk membaca halaman web">
+			<Globe size={11} /> web_fetch
+		</span>
+		{#if quota}
+			<span class="muted small">Sisa kuota: {quota.today?.requests ?? 0} req</span>
+		{/if}
 	</div>
 
 	<div class="card chat-pane">
 		<div class="chat-msgs" bind:this={msgsEl}>
 			{#if msgs.length === 0}
 				<div class="kv" style="justify-content:center;padding:40px 0;color:var(--muted)">
-					<Sparkles size={18} /> Pilih model, lalu mulai mengobrol — streaming + riwayat tersimpan
+					<Sparkles size={18} /> Model bisa membuka halaman web — coba: <span class="mono">ringkas https://example.com</span>
 				</div>
 			{/if}
 			{#each msgs as m, i (i)}
@@ -196,6 +271,15 @@
 							<summary>💡 Thinking</summary>
 							<div class="think-body">{m.reasoning}</div>
 						</details>
+					{/if}
+					{#if m.tools?.length}
+						<div class="tool-chips">
+							{#each m.tools as tl}
+								<span class="badge info" title={tl.args}>
+									<Globe size={11} /> {tl.name}{tl.url ? ': ' + tl.url : ''}
+								</span>
+							{/each}
+						</div>
 					{/if}
 					<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 					{@html md(m.content)}
@@ -225,7 +309,52 @@
 	</div>
 </div>
 
+{#if showHistory}
+	<Modal title={t('history')} onclose={() => (showHistory = false)}>
+		<button class="btn" style="width:100%;margin-bottom:12px" onclick={newConversation}>
+			<Plus size={15} /> {t('new_chat')}
+		</button>
+		{#each conversations as c (c.id)}
+			<div class="conv-item" class:active={current === c.id}>
+				<button class="grow" style="all:unset;cursor:pointer;display:block" onclick={() => openConversation(c.id)}>
+					<div class="small" style="font-weight:700">{c.title || t('new_chat')}</div>
+					<div class="muted" style="font-size:10.5px">{fmtTs(c.updated_at)}</div>
+				</button>
+				<button class="icon-btn" onclick={() => delConversation(c.id)}>
+					<Trash2 size={13} />
+				</button>
+			</div>
+		{:else}
+			<p class="muted small">Belum ada percakapan.</p>
+		{/each}
+	</Modal>
+{/if}
+
 <style>
+	.chat-page {
+		display: flex;
+		flex-direction: column;
+		height: calc(100vh - 158px);
+		min-height: 460px;
+	}
+	.chat-toolbar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+		margin-bottom: 10px;
+	}
+	.model-select { max-width: 340px; min-width: 200px; }
+	.tool-badge { cursor: help; }
+	.chat-pane {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		overflow: hidden;
+	}
+	.chat-msgs { flex: 1; overflow-y: auto; padding: 6px 2px; }
+	.tool-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
 	.think {
 		margin: 2px 0 8px;
 		border: 1px dashed var(--border-strong);
@@ -251,4 +380,20 @@
 		line-height: 1.55;
 	}
 	.msg.assistant .think { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+	.conv-item {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 9px 11px;
+		border-radius: 10px;
+		cursor: pointer;
+		transition: background var(--speed);
+	}
+	.conv-item:hover { background: var(--surface-2); }
+	.conv-item.active { background: var(--grad-accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+	@media (max-width: 640px) {
+		.chat-page { height: auto; min-height: 60dvh; }
+		.chat-msgs { max-height: 52dvh; }
+		.model-select { max-width: none; flex: 1; }
+	}
 </style>

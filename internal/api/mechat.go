@@ -222,11 +222,31 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 					reasoning.WriteString(e.Delta.Reasoning)
 					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, map[string]any{"reasoning_content": e.Delta.Reasoning}))
 				}
+				if len(e.Delta.ToolCalls) > 0 {
+					tcs := make([]map[string]any, 0, len(e.Delta.ToolCalls))
+					for _, tc := range e.Delta.ToolCalls {
+						tcj := map[string]any{
+							"index":    tc.Index,
+							"function": map[string]any{"name": tc.Name, "arguments": tc.Arguments},
+						}
+						if tc.ID != "" {
+							tcj["id"] = tc.ID
+						}
+						tcs = append(tcs, tcj)
+					}
+					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, map[string]any{"tool_calls": tcs}))
+				}
 				if e.Delta.Text != "" {
 					content.WriteString(e.Delta.Text)
 					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, map[string]any{"content": e.Delta.Text}))
 				}
 				wmu.Unlock()
+			case translate.EventMessageEnd:
+				if e.Delta != nil && e.Delta.FinishReason != "" {
+					wmu.Lock()
+					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, map[string]any{"finish_reason": e.Delta.FinishReason}))
+					wmu.Unlock()
+				}
 			case translate.EventUsage:
 				if e.Usage != nil {
 					tokensIn, tokensOut = e.Usage.PromptTokens, e.Usage.CompletionTokens

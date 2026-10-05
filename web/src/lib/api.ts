@@ -61,16 +61,17 @@ export const api = {
 
 	// streaming chat playground (konsumsi SSE gaya OpenAI)
 	async chatStream(
-		opts: { model: string; messages: { role: string; content: string }[]; temperature?: number; maxTokens?: number; signal?: AbortSignal },
+		opts: { model: string; messages: { role: string; content: string }[]; temperature?: number; maxTokens?: number; tools?: any[]; signal?: AbortSignal },
 		onDelta: (text: string) => void,
 		onMeta?: (usage: any) => void,
-		onExtra?: (e: { reasoning?: string; model?: string }) => void
+		onExtra?: (e: { reasoning?: string; model?: string }) => void,
+		onChunk?: (j: any) => void
 	) {
 		const res = await fetch('/api/me/chat', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
 			credentials: 'same-origin',
-			body: JSON.stringify({ model: opts.model, messages: opts.messages, temperature: opts.temperature, max_tokens: opts.maxTokens, stream: true }),
+			body: JSON.stringify({ model: opts.model, messages: opts.messages, temperature: opts.temperature, max_tokens: opts.maxTokens, tools: opts.tools, stream: true }),
 			signal: opts.signal
 		});
 		if (!res.ok || !res.body) {
@@ -95,6 +96,7 @@ export const api = {
 					try {
 						const j = JSON.parse(payload);
 						if (j.error) throw new Error(j.error.message || 'upstream error');
+						if (onChunk) onChunk(j);
 						const delta = j.choices?.[0]?.delta;
 						if (delta?.reasoning_content && onExtra) onExtra({ reasoning: delta.reasoning_content });
 						if (delta?.content) onDelta(delta.content);
