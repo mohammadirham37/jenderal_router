@@ -25,7 +25,6 @@
 	$effect(() => { loadCf(); });
 
 	function cfGuide(): string {
-		const addr = cf?.gateway_addr || '127.0.0.1:20130';
 		if (cfTab === 'daftar') {
 			return `YANG HARUS DIDAFTARKAN DI DASHBOARD CLOUDFLARE
 =================================================
