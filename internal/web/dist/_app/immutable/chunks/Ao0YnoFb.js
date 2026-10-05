@@ -1,1 +1,0 @@
-import"./Bzak7iHL.js";import{s as r,r as a}from"./DHTfce5F.js";import{I as p}from"./DpFxSY7m.js";var n=new Set(["$$slots","$$events","$$legacy"]);function $(e,s){let t=a(s,n);const o={name:"gauge",size:24,node:[["path",{d:"m12 14 4-4"}],["path",{d:"M3.34 19a10 10 0 1 1 17.32 0"}]]};p(e,r(()=>t,{get icon(){return o}}))}export{$ as G};

@@ -1,1 +1,0 @@
-import"./Bzak7iHL.js";import{s as a,r as o}from"./DHTfce5F.js";import{I as n}from"./DpFxSY7m.js";var p=new Set(["$$slots","$$events","$$legacy"]);function m(e,t){let r=o(t,p);const s={name:"chart-line",size:24,node:[["path",{d:"M3 3v16a2 2 0 0 0 2 2h16"}],["path",{d:"m19 9-5 5-4-4-3 3"}]],aliases:["line-chart"]};n(e,a(()=>r,{get icon(){return s}}))}export{m as C};

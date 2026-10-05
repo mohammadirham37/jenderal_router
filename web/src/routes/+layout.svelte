@@ -4,8 +4,9 @@
 	import { goto } from '$app/navigation';
 	import {
 		Satellite, LayoutDashboard, MessageSquare, Cable, BrainCircuit, Link2, Users,
-		ScrollText, ChartLine, Server, Settings, LogOut, Menu, X
+		ScrollText, ChartLine, Server, Settings, LogOut, Menu, X, PanelLeftClose, PanelLeftOpen
 	} from '@lucide/svelte';
+	import { browser } from '$app/environment';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import LangToggle from '$lib/components/LangToggle.svelte';
 	import { api, setCSRF, resetCSRF, setUnauthorizedHandler } from '$lib/api';
@@ -35,6 +36,11 @@
 	let { children } = $props();
 
 	let menuOpen = $state(false);
+	// collapse sidebar di desktop — preferensi diingat antar-kunjungan
+	let collapsed = $state(typeof localStorage !== 'undefined' && localStorage.getItem('jr_sidebar') === '1');
+	$effect(() => {
+		try { localStorage.setItem('jr_sidebar', collapsed ? '1' : '0'); } catch { /* */ }
+	});
 
 	setUnauthorizedHandler(() => {
 		resetCSRF();
@@ -78,10 +84,18 @@
 		{#if menuOpen}
 			<div class="backdrop" onclick={() => (menuOpen = false)} aria-hidden="true"></div>
 		{/if}
-		<aside class="sidebar" class:open={menuOpen}>
+		<aside class="sidebar" class:collapsed class:open={menuOpen}>
 			<div class="brand">
 				<span class="logo"><Satellite size={19} /></span>
-				<span>JenderalRouter</span>
+				<span class="brand-name">JenderalRouter</span>
+				<span class="grow"></span>
+				<button
+					class="icon-btn"
+					title={collapsed ? 'Perluas sidebar' : 'Ciutkan sidebar'}
+					onclick={() => (collapsed = !collapsed)}
+				>
+					{#if collapsed}<PanelLeftOpen size={16} />{:else}<PanelLeftClose size={16} />{/if}
+				</button>
 			</div>
 			<nav class="nav">
 				{#each NAV as item, i}
@@ -92,10 +106,11 @@
 						<a
 							href={item.route}
 							class:active={page.url.pathname === item.route}
+							title={t(item.label)}
 							onclick={() => (menuOpen = false)}
 						>
 							<item.icon size={17} />
-							{t(item.label)}
+							<span class="nav-label">{t(item.label)}</span>
 						</a>
 					{/if}
 				{/each}
@@ -103,13 +118,13 @@
 			<div class="sidebar-foot">
 				<div class="user-chip">
 					<span class="avatar">{initials}</span>
-					<span class="grow small" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+					<span class="grow small user-name" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
 						{app.me.email}
 						<div class="muted" style="font-size:10.5px">{app.me.role}</div>
 					</span>
 					<button class="icon-btn" onclick={logout} title={t('logout')}><LogOut size={15} /></button>
 				</div>
-				<div class="row" style="justify-content:space-between">
+				<div class="row foot-toggles" style="justify-content:space-between">
 					<ThemeToggle />
 					<LangToggle />
 				</div>
