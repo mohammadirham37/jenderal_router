@@ -14,6 +14,8 @@ type APIKey struct {
 	UserID        int64    `json:"user_id"`
 	Prefix        string   `json:"prefix"`
 	KeyHash       string   `json:"-"`
+	SecretEnc     string   `json:"-"`
+	HasSecret     bool     `json:"has_secret"` // salinan terenkripsi ada → bisa disalin ulang admin
 	Name          string   `json:"name"`
 	AllowedModels string   `json:"allowed_models"`
 	IPAllowlist   string   `json:"ip_allowlist"`
@@ -26,15 +28,17 @@ type APIKey struct {
 }
 
 // CreateAPIKey membuat key baru; plaintext dikembalikan hanya sekali.
-func (s *Store) CreateAPIKey(userID int64, name string, plain, hash string, allowedModels, ipAllowlist string, rpm, tpm int, expiresAt string) (*APIKey, error) {
+// secretEnc = salinan plaintext terenkripsi agar admin bisa menyalin ulang
+// (kosong untuk key lama sebelum fitur ini — tidak bisa disalin ulang).
+func (s *Store) CreateAPIKey(userID int64, name string, plain, hash, secretEnc string, allowedModels, ipAllowlist string, rpm, tpm int, expiresAt string) (*APIKey, error) {
 	if len(plain) < 8 {
 		return nil, errors.New("key terlalu pendek")
 	}
 	prefix := plain[:8]
 	res, err := s.DB.Exec(`INSERT INTO api_keys
-		(user_id, prefix, key_hash, name, allowed_models, ip_allowlist, rpm, tpm, expires_at)
-		VALUES (?,?,?,?,?,?,?,?,?)`,
-		userID, prefix, hash, name, allowedModels, ipAllowlist, rpm, tpm, expiresAt)
+		(user_id, prefix, key_hash, secret_enc, name, allowed_models, ip_allowlist, rpm, tpm, expires_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		userID, prefix, hash, secretEnc, name, allowedModels, ipAllowlist, rpm, tpm, expiresAt)
 	if err != nil {
 		return nil, err
 	}
@@ -45,9 +49,9 @@ func (s *Store) CreateAPIKey(userID int64, name string, plain, hash string, allo
 // GetAPIKey mengambil key berdasarkan id.
 func (s *Store) GetAPIKey(id int64) (*APIKey, error) {
 	k := &APIKey{}
-	err := s.DB.QueryRow(`SELECT id, user_id, prefix, key_hash, name, allowed_models, ip_allowlist,
+	err := s.DB.QueryRow(`SELECT id, user_id, prefix, key_hash, secret_enc, name, allowed_models, ip_allowlist,
 		rpm, tpm, expires_at, revoked_at, created_at FROM api_keys WHERE id = ?`, id).
-		Scan(&k.ID, &k.UserID, &k.Prefix, &k.KeyHash, &k.Name, &k.AllowedModels, &k.IPAllowlist,
+		Scan(&k.ID, &k.UserID, &k.Prefix, &k.KeyHash, &k.SecretEnc, &k.Name, &k.AllowedModels, &k.IPAllowlist,
 			&k.RPM, &k.TPM, &k.ExpiresAt, &k.RevokedAt, &k.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -56,15 +60,16 @@ func (s *Store) GetAPIKey(id int64) (*APIKey, error) {
 		return nil, err
 	}
 	k.AllowedList = parseJSONList(k.AllowedModels)
+	k.HasSecret = k.SecretEnc != ""
 	return k, nil
 }
 
 // GetAPIKeyByHash mencari key aktif dari hash (jalur auth per request).
 func (s *Store) GetAPIKeyByHash(hash string) (*APIKey, error) {
 	k := &APIKey{}
-	err := s.DB.QueryRow(`SELECT id, user_id, prefix, key_hash, name, allowed_models, ip_allowlist,
+	err := s.DB.QueryRow(`SELECT id, user_id, prefix, key_hash, secret_enc, name, allowed_models, ip_allowlist,
 		rpm, tpm, expires_at, revoked_at, created_at FROM api_keys WHERE key_hash = ?`, hash).
-		Scan(&k.ID, &k.UserID, &k.Prefix, &k.KeyHash, &k.Name, &k.AllowedModels, &k.IPAllowlist,
+		Scan(&k.ID, &k.UserID, &k.Prefix, &k.KeyHash, &k.SecretEnc, &k.Name, &k.AllowedModels, &k.IPAllowlist,
 			&k.RPM, &k.TPM, &k.ExpiresAt, &k.RevokedAt, &k.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -73,12 +78,13 @@ func (s *Store) GetAPIKeyByHash(hash string) (*APIKey, error) {
 		return nil, err
 	}
 	k.AllowedList = parseJSONList(k.AllowedModels)
+	k.HasSecret = k.SecretEnc != ""
 	return k, nil
 }
 
 // ListKeysByUser mengembalikan seluruh key milik user.
 func (s *Store) ListKeysByUser(userID int64) ([]*APIKey, error) {
-	rows, err := s.DB.Query(`SELECT id, user_id, prefix, key_hash, name, allowed_models, ip_allowlist,
+	rows, err := s.DB.Query(`SELECT id, user_id, prefix, key_hash, secret_enc, name, allowed_models, ip_allowlist,
 		rpm, tpm, expires_at, revoked_at, created_at FROM api_keys WHERE user_id = ? ORDER BY id`, userID)
 	if err != nil {
 		return nil, err
@@ -87,14 +93,28 @@ func (s *Store) ListKeysByUser(userID int64) ([]*APIKey, error) {
 	var out []*APIKey
 	for rows.Next() {
 		k := &APIKey{}
-		if err := rows.Scan(&k.ID, &k.UserID, &k.Prefix, &k.KeyHash, &k.Name, &k.AllowedModels, &k.IPAllowlist,
+		if err := rows.Scan(&k.ID, &k.UserID, &k.Prefix, &k.KeyHash, &k.SecretEnc, &k.Name, &k.AllowedModels, &k.IPAllowlist,
 			&k.RPM, &k.TPM, &k.ExpiresAt, &k.RevokedAt, &k.CreatedAt); err != nil {
 			return nil, err
 		}
 		k.AllowedList = parseJSONList(k.AllowedModels)
+		k.HasSecret = k.SecretEnc != ""
 		out = append(out, k)
 	}
 	return out, rows.Err()
+}
+
+// GetKeySecret membuka salinan terenkripsi key (untuk tombol salin admin).
+// ErrNotFound bila key lama tanpa salinan.
+func (s *Store) GetKeySecret(id int64) (string, error) {
+	k, err := s.GetAPIKey(id)
+	if err != nil {
+		return "", err
+	}
+	if k.SecretEnc == "" {
+		return "", ErrNotFound
+	}
+	return s.DecryptSecret(k.SecretEnc)
 }
 
 // RevokeAPIKey mencabut key (tidak menghapus log).

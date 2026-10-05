@@ -765,7 +765,12 @@ func (a *App) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	k, err := a.st.CreateAPIKey(id, req.Name, plain, hash, req.AllowedModels, req.IPAllowlist, req.RPM, req.TPM, req.ExpiresAt)
+	// salinan terenkripsi — agar admin bisa menyalin ulang dari dashboard
+	enc, encErr := a.st.EncryptSecret(plain)
+	if encErr != nil {
+		enc = "" // key tetap dibuat, hanya tidak bisa disalin ulang
+	}
+	k, err := a.st.CreateAPIKey(id, req.Name, plain, hash, enc, req.AllowedModels, req.IPAllowlist, req.RPM, req.TPM, req.ExpiresAt)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -773,6 +778,23 @@ func (a *App) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	a.gate.InvalidateKey(hash)
 	a.audit(r, "key.create", "keys/"+fmtInt(k.ID), nil, map[string]string{"prefix": k.Prefix})
 	writeJSON(w, 201, map[string]any{"key": k, "plaintext": plain})
+}
+
+// handleRevealKey membuka salinan terenkripsi key (tombol Salin di dashboard).
+// Key lama tanpa salinan → 409 (buat ulang key).
+func (a *App) handleRevealKey(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	plain, err := a.st.GetKeySecret(id)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "salinan key tidak tersedia — buat ulang API key untuk bisa disalin"})
+		return
+	}
+	a.audit(r, "key.reveal", "keys/"+fmtInt(id), nil, nil)
+	writeJSON(w, 200, map[string]string{"plaintext": plain})
 }
 
 func (a *App) handleDeleteKey(w http.ResponseWriter, r *http.Request) {

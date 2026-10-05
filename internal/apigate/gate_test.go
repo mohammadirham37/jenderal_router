@@ -24,7 +24,7 @@ func gateTestEnv(t *testing.T) (*store.Store, *Gate, string, *store.User) {
 		t.Fatal(err)
 	}
 	plain, hash, _ := crypto.NewAPIKey()
-	_, err = s.CreateAPIKey(user.ID, "kunci", plain, hash, "*", "", 0, 0, "")
+	_, err = s.CreateAPIKey(user.ID, "kunci", plain, hash, "", "*", "", 0, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestAuthenticateXAPIKeyHeader(t *testing.T) {
 func TestAuthenticateRevokedAndExpired(t *testing.T) {
 	s, g, _, user := gateTestEnv(t)
 	plain, hash, _ := crypto.NewAPIKey()
-	k, _ := s.CreateAPIKey(user.ID, "sementara", plain, hash, "*", "", 0, 0, "")
+	k, _ := s.CreateAPIKey(user.ID, "sementara", plain, hash, "", "*", "", 0, 0, "")
 	if err := s.RevokeAPIKey(k.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestAuthenticateRevokedAndExpired(t *testing.T) {
 
 	plain2, hash2, _ := crypto.NewAPIKey()
 	exp := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
-	s.CreateAPIKey(user.ID, "kedaluwarsa", plain2, hash2, "*", "", 0, 0, exp)
+	s.CreateAPIKey(user.ID, "kedaluwarsa", plain2, hash2, "", "*", "", 0, 0, exp)
 	if _, apiErr := g.Authenticate(reqWithKey(plain2)); apiErr == nil {
 		t.Fatal("kedaluwarsa harus ditolak")
 	}
@@ -112,7 +112,7 @@ func TestAuthenticateDisabledUser(t *testing.T) {
 func TestIPAllowlist(t *testing.T) {
 	s, g, _, user := gateTestEnv(t)
 	plain, hash, _ := crypto.NewAPIKey()
-	s.CreateAPIKey(user.ID, "dibatasi", plain, hash, "*", "10.0.0.0/8,192.168.1.1", 0, 0, "")
+	s.CreateAPIKey(user.ID, "dibatasi", plain, hash, "", "*", "10.0.0.0/8,192.168.1.1", 0, 0, "")
 	r := reqWithKey(plain)
 	r.RemoteAddr = "203.0.113.99:1234"
 	if _, apiErr := g.Authenticate(r); apiErr == nil || apiErr.Code != "ip_not_allowed" {
@@ -128,7 +128,7 @@ func TestIPAllowlist(t *testing.T) {
 func TestModelAllowed(t *testing.T) {
 	s, g, _, user := gateTestEnv(t)
 	plain, hash, _ := crypto.NewAPIKey()
-	s.CreateAPIKey(user.ID, "terbatas", plain, hash, "oa/gpt-5.4,coding-hemat", "", 0, 0, "")
+	s.CreateAPIKey(user.ID, "terbatas", plain, hash, "", "oa/gpt-5.4,coding-hemat", "", 0, 0, "")
 	ac, apiErr := g.Authenticate(reqWithKey(plain))
 	if apiErr != nil {
 		t.Fatal(apiErr)
@@ -144,7 +144,7 @@ func TestModelAllowed(t *testing.T) {
 func TestRateLimitRPM(t *testing.T) {
 	_, g, _, user := gateTestEnv(t)
 	plain, hash, _ := crypto.NewAPIKey()
-	if _, err := g.Store.CreateAPIKey(user.ID, "rpm", plain, hash, "*", "", 3, 0, ""); err != nil {
+	if _, err := g.Store.CreateAPIKey(user.ID, "rpm", plain, hash, "", "*", "", 3, 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	var lastErr *APIError

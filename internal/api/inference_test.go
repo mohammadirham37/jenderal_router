@@ -45,7 +45,7 @@ func appTestEnv(t *testing.T) (*App, *store.Store, string) {
 		t.Fatal(err)
 	}
 	plain, hash, _ := crypto.NewAPIKey()
-	if _, err := app.st.CreateAPIKey(user.ID, "utama", plain, hash, "*", "", 0, 0, ""); err != nil {
+	if _, err := app.st.CreateAPIKey(user.ID, "utama", plain, hash, "", "*", "", 0, 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	_ = admin
@@ -346,7 +346,7 @@ func TestAuthErrorsFormatE2E(t *testing.T) {
 	// model tidak diizinkan → 403
 	plain, hash, _ := crypto.NewAPIKey()
 	user, _ := st.GetUserByEmail("dev@test")
-	st.CreateAPIKey(user.ID, "terbatas", plain, hash, "mk/mock-model", "", 0, 0, "")
+	st.CreateAPIKey(user.ID, "terbatas", plain, hash, "", "mk/mock-model", "", 0, 0, "")
 	w = doJSON(t, app.Handler(), "POST", "/v1/chat/completions", plain, inferBody("model-lain", false))
 	if w.Code != 403 {
 		t.Fatalf("status = %d", w.Code)
@@ -439,7 +439,7 @@ func TestRPMLimitE2E(t *testing.T) {
 	seedMockProvider(t, st, "Mock", "mk", mock.URL)
 	user, _ := st.GetUserByEmail("dev@test")
 	plain, hash, _ := crypto.NewAPIKey()
-	st.CreateAPIKey(user.ID, "rpm", plain, hash, "*", "", 2, 0, "") // RPM=2
+	st.CreateAPIKey(user.ID, "rpm", plain, hash, "", "*", "", 2, 0, "") // RPM=2
 
 	var sawLimit bool
 	for i := 0; i < 4; i++ {

@@ -15,6 +15,8 @@
 		try {
 			const res = await api.get('/api/admin/users');
 			users = (res.users || []).map((x: any) => x.user);
+			// muat daftar key semua user sekaligus — agar tidak hilang saat refresh
+			await Promise.all(users.map((u) => loadKeys(u)));
 		} catch (e: any) {
 			toast(e.message, 'err');
 		} finally {
@@ -62,6 +64,15 @@
 	}
 	async function copyKey() {
 		(await copyText(plaintext)) ? toast('disalin ✓', 'ok') : toast('gagal menyalin — blok teksnya dan salin manual', 'err');
+	}
+	// salin ulang key lama dari salinan terenkripsi di server
+	async function copyKeyFull(k: any) {
+		try {
+			const r = await api.get(`/api/admin/keys/${k.id}/reveal`);
+			(await copyText(r.plaintext)) ? toast('key disalin ✓', 'ok') : toast('gagal menyalin', 'err');
+		} catch (e: any) {
+			toast(e.message || 'salinan tidak tersedia', 'err');
+		}
 	}
 
 	// ---- panduan koneksi klien pihak ketiga ----
@@ -165,6 +176,13 @@
 						<span class="small">{k.name}</span>
 						{#if k.revoked_at}<span class="badge err">revoked</span>{:else}<span class="badge ok"><span class="dot"></span>active</span>{/if}
 						<span class="muted small">rpm={k.rpm} tpm={k.tpm}</span>
+						{#if !k.revoked_at && k.has_secret}
+							<button class="btn ghost sm" title="salin API key lengkap" onclick={() => copyKeyFull(k)}>
+								<Copy size={12} /> Salin
+							</button>
+						{:else if !k.revoked_at}
+							<span class="muted small" title="key lama tanpa salinan — buat ulang untuk bisa disalin">tidak bisa disalin</span>
+						{/if}
 						<button class="btn ghost sm" onclick={() => delKey(k)}><X size={12} /></button>
 					</div>
 				{:else}

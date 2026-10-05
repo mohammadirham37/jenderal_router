@@ -91,7 +91,7 @@ func TestAPIKeyLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k, err := s.CreateAPIKey(u.ID, "utama", plain, hash, "oa/gpt-5.4, coding-hemat", "10.0.0.0/8", 60, 100000, "")
+	k, err := s.CreateAPIKey(u.ID, "utama", plain, hash, "", "oa/gpt-5.4, coding-hemat", "10.0.0.0/8", 60, 100000, "")
 	if err != nil {
 		t.Fatalf("CreateAPIKey: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestAPIKeyExpiry(t *testing.T) {
 	u, _ := s.CreateUser("x@y.z", "Sandi-Kuat-123", RoleMember)
 	plain, hash, _ := crypto.NewAPIKey()
 	exp := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
-	k, err := s.CreateAPIKey(u.ID, "lama", plain, hash, "*", "", 0, 0, exp)
+	k, err := s.CreateAPIKey(u.ID, "lama", plain, hash, "", "*", "", 0, 0, exp)
 	if err != nil {
 		t.Fatal(err)
 	}
