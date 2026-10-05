@@ -1,22 +1,30 @@
 <script lang="ts">
-	import { Users, Plus, Trash2, KeyRound, Gauge, Copy, X } from '@lucide/svelte';
+	import { Users, Plus, Trash2, KeyRound, Gauge, Copy, X, Activity, Search } from '@lucide/svelte';
 	import { browser } from '$app/environment';
-	import { api } from '$lib/api';
+	import { api, fmtNum, fmtCost, fmtTs } from '$lib/api';
 	import { copyText } from '$lib/clipboard';
 	import { t, toast } from '$lib/stores.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import Stat from '$lib/components/Stat.svelte';
 
 	let users = $state<any[]>([]);
 	let keysByUser = $state<Record<number, any[]>>({});
+	let usageByUser = $state<Record<number, any>>({});
 	let loading = $state(true);
+	let search = $state('');
 
 	async function reload() {
 		loading = true;
 		try {
-			const res = await api.get('/api/admin/users');
+			const [res, u] = await Promise.all([
+				api.get('/api/admin/users'),
+				api.get('/api/admin/users/usage?days=7')
+			]);
 			users = (res.users || []).map((x: any) => x.user);
-			// muat daftar key semua user sekaligus — agar tidak hilang saat refresh
-			await Promise.all(users.map((u) => loadKeys(u)));
+			const map: Record<number, any> = {};
+			for (const pu of u.per_user || []) map[pu.user_id] = pu;
+			usageByUser = map;
+			await Promise.all(users.map((usr) => loadKeys(usr)));
 		} catch (e: any) {
 			toast(e.message, 'err');
 		} finally {
@@ -31,6 +39,20 @@
 			keysByUser[u.id] = res.keys || [];
 		} catch { keysByUser[u.id] = []; }
 	}
+
+	const filtered = $derived(
+		users.filter((u) => !search || u.email.toLowerCase().includes(search.toLowerCase()))
+	);
+	const totals = $derived.by(() => {
+		let req = 0, tok = 0, cost = 0, aktif = 0;
+		for (const pu of Object.values(usageByUser) as any[]) {
+			req += pu.requests || 0;
+			tok += (pu.tokens_in || 0) + (pu.tokens_out || 0);
+			cost += pu.cost_usd || 0;
+			if ((pu.requests || 0) > 0) aktif++;
+		}
+		return { req, tok, cost, aktif };
+	});
 
 	// ---- buat user ----
 	let showUser = $state(false);
@@ -64,15 +86,6 @@
 	}
 	async function copyKey() {
 		(await copyText(plaintext)) ? toast('disalin ✓', 'ok') : toast('gagal menyalin — blok teksnya dan salin manual', 'err');
-	}
-	// salin ulang key lama dari salinan terenkripsi di server
-	async function copyKeyFull(k: any) {
-		try {
-			const r = await api.get(`/api/admin/keys/${k.id}/reveal`);
-			(await copyText(r.plaintext)) ? toast('key disalin ✓', 'ok') : toast('gagal menyalin', 'err');
-		} catch (e: any) {
-			toast(e.message || 'salinan tidak tersedia', 'err');
-		}
 	}
 
 	// ---- panduan koneksi klien pihak ketiga ----
@@ -115,6 +128,20 @@
 		(await copyText(guideText())) ? toast('konfigurasi disalin ✓', 'ok') : toast('gagal menyalin — salin manual dari kotak konfigurasi', 'err');
 	}
 
+	// salin ulang key dari salinan terenkripsi (key lama tanpa salinan → 409)
+	let revealingKey = $state(0);
+	async function revealAndCopy(k: any) {
+		try {
+			revealingKey = k.id;
+			const r = await api.get(`/api/admin/keys/${k.id}/reveal`);
+			(await copyText(r.plaintext)) ? toast('key disalin ✓', 'ok') : toast('gagal menyalin', 'err');
+		} catch (e: any) {
+			toast(e.message || 'salinan tidak tersedia — buat ulang key', 'err');
+		} finally {
+			revealingKey = 0;
+		}
+	}
+
 	// ---- kuota ----
 	let qFor = $state<any>(null);
 	let qDayTok = $state('0'); let qDayReq = $state('0'); let qDayCost = $state('0');
@@ -149,56 +176,89 @@
 	</button>
 </div>
 
-{#if loading}
-	<div class="card"><span class="spinner dark"></span> {t('loading')}…</div>
-{:else}
-	{#each users as u (u.id)}
-		{@const keys = keysByUser[u.id]}
-		<div class="card" style="margin-bottom:12px">
-			<div class="page-head" style="margin-bottom:8px">
-				<div class="row">
-					<strong>{u.email}</strong>
-					<span class="badge {u.role === 'super_admin' ? 'err' : 'info'}">{u.role}</span>
-					{#if u.status === 'active'}<span class="badge ok"><span class="dot"></span>active</span>
-					{:else}<span class="badge warn">{u.status}</span>{/if}
-				</div>
-				<div class="row">
-					<button class="btn ghost sm" onclick={() => { qFor = u; loadKeys(u); }}><Gauge size={13} /> {t('quota')}</button>
-					<button class="btn ghost sm" onclick={() => { keyFor = u; plaintext = ''; kName = ''; loadKeys(u); }}><KeyRound size={13} /> {t('api_key')}</button>
-					<button class="btn danger sm" onclick={() => delUser(u)}><Trash2 size={13} /></button>
+<div class="grid cols-4">
+	<Stat icon={Users} label="Total user" value={String(users.length)} />
+	<Stat icon={Activity} label="User aktif (7 hari)" value={String(totals.aktif)} />
+	<Stat icon={Activity} label="Request (7 hari)" value={fmtNum(totals.req)} />
+	<Stat icon={Activity} label="Biaya (7 hari)" value={fmtCost(totals.cost)} />
+</div>
+
+<div class="card" style="margin-top:14px">
+	<div class="kv" style="margin-bottom:4px">
+		<div class="row grow" style="position:relative">
+			<Search size={15} style="position:absolute;left:10px;color:var(--muted)" />
+			<input style="padding-left:32px" bind:value={search} placeholder="cari email…" />
+		</div>
+		<span class="muted small">{filtered.length} dari {users.length} user</span>
+		<span class="grow"></span>
+		<button class="btn ghost sm" onclick={reload}><Activity size={13} /> Muat ulang</button>
+	</div>
+
+	{#if loading}
+		<div style="padding:20px 0"><span class="spinner dark"></span> {t('loading')}…</div>
+	{:else}
+		{#each filtered as u (u.id)}
+			{@const uu = usageByUser[u.id]}
+			{@const uk = keysByUser[u.id]}
+			<div class="ucard">
+				<div class="uc-main">
+					<div class="uc-id">
+						<strong>{u.email}</strong>
+						<div class="row" style="margin-top:3px">
+							<span class="badge {u.role === 'super_admin' ? 'err' : 'info'}">{u.role}</span>
+							{#if u.status === 'active'}<span class="badge ok"><span class="dot"></span>active</span>
+							{:else}<span class="badge warn">{u.status}</span>{/if}
+							<span class="muted small">dibuat {fmtTs(u.created_at)}</span>
+						</div>
+					</div>
+					<div class="uc-usage">
+						<div class="kv small">
+							<span class="muted">Pemakaian 7 hari:</span>
+							{#if uu && (uu.requests || 0) > 0}
+								<span class="badge info">{uu.requests} request</span>
+								<span class="muted small mono">{fmtNum((uu.tokens_in || 0) + (uu.tokens_out || 0))} token · {fmtCost(uu.cost_usd)}</span>
+							{:else}
+								<span class="muted small">belum ada aktivitas</span>
+							{/if}
+						</div>
+						<div class="uc-keys">
+							{#if uk}
+								{#each uk as k (k.id)}
+									<div class="kv" style="padding:3px 0">
+										<span class="mono small">{k.prefix}…</span>
+										<span class="small muted">{k.name}</span>
+										{#if k.revoked_at}<span class="badge err">revoked</span>
+										{:else}<span class="badge ok"><span class="dot"></span>active</span>{/if}
+										<span class="grow"></span>
+										{#if !k.revoked_at && k.has_secret}
+											<button class="btn ghost sm" title="salin API key lengkap" onclick={() => revealAndCopy(k)}>
+												{#if revealingKey === k.id}<span class="spinner"></span>{:else}<Copy size={12} />{/if}
+												Salin
+											</button>
+										{/if}
+										<button class="btn ghost sm" title="hapus key" onclick={() => delKey(k)}><X size={12} /></button>
+									</div>
+								{/each}
+							{/if}
+						</div>
+					</div>
+					<div class="uc-actions">
+						<button class="btn ghost sm" onclick={() => { qFor = u; loadKeys(u); }}><Gauge size={13} /> {t('quota')}</button>
+						<button class="btn ghost sm" onclick={() => { keyFor = u; plaintext = ''; kName = ''; loadKeys(u); }}><KeyRound size={13} /> {t('api_key')}</button>
+						<button class="btn danger sm" onclick={() => delUser(u)}><Trash2 size={13} /></button>
+					</div>
 				</div>
 			</div>
-			<div class="muted small" style="font-weight:700;margin-bottom:4px">{t('keys')}</div>
-			{#if keys}
-				{#each keys as k (k.id)}
-					<div class="kv" style="margin-bottom:4px">
-						<span class="mono small">{k.prefix}…</span>
-						<span class="small">{k.name}</span>
-						{#if k.revoked_at}<span class="badge err">revoked</span>{:else}<span class="badge ok"><span class="dot"></span>active</span>{/if}
-						<span class="muted small">rpm={k.rpm} tpm={k.tpm}</span>
-						{#if !k.revoked_at && k.has_secret}
-							<button class="btn ghost sm" title="salin API key lengkap" onclick={() => copyKeyFull(k)}>
-								<Copy size={12} /> Salin
-							</button>
-						{:else if !k.revoked_at}
-							<span class="muted small" title="key lama tanpa salinan — buat ulang untuk bisa disalin">tidak bisa disalin</span>
-						{/if}
-						<button class="btn ghost sm" onclick={() => delKey(k)}><X size={12} /></button>
-					</div>
-				{:else}
-					<span class="muted small">—</span>
-				{/each}
-			{:else}
-				<span class="muted small">…</span>
-			{/if}
-		</div>
-	{/each}
-{/if}
+		{:else}
+			<div class="muted" style="padding:12px 0">Tidak ada user yang cocok.</div>
+		{/each}
+	{/if}
+</div>
 
 {#if showUser}
 	<Modal title={t('create_user')} onclose={() => (showUser = false)}>
 		<label>{t('email')}</label>
-		<input bind:value={uEmail} placeholder="budi@tim.com" />
+		<input bind:value={uEmail} placeholder="budi@unsoed.ac.id" />
 		<label>{t('password')}</label>
 		<input type="password" bind:value={uPass} placeholder="≥12 karakter" />
 		<label>{t('role')}</label>
@@ -276,16 +336,40 @@
 
 {#if qFor}
 	<Modal title={`${t('quota')} — ${qFor.email}`} onclose={() => (qFor = null)}>
-		<h2 style="margin-top:0">{t('day')}</h2>
-		<label>Batas token</label><input bind:value={qDayTok} />
-		<label>Batas request</label><input bind:value={qDayReq} />
-		<label>Batas biaya (USD)</label><input bind:value={qDayCost} />
-		<h2 style="margin-top:16px">{t('month')}</h2>
-		<label>Batas token</label><input bind:value={qMonTok} />
-		<label>Batas biaya (USD)</label><input bind:value={qMonCost} />
+		<label>Kuota harian — token</label>
+		<input bind:value={qDayTok} placeholder="0 = tanpa batas" />
+		<label>Kuota harian — request</label>
+		<input bind:value={qDayReq} placeholder="0 = tanpa batas" />
+		<label>Kuota harian — biaya (USD)</label>
+		<input bind:value={qDayCost} placeholder="0 = tanpa batas" />
+		<label>Kuota bulanan — token</label>
+		<input bind:value={qMonTok} placeholder="0 = tanpa batas" />
+		<label>Kuota bulanan — biaya (USD)</label>
+		<input bind:value={qMonCost} placeholder="0 = tanpa batas" />
 		<div class="modal-actions">
 			<button class="btn ghost" onclick={() => (qFor = null)}>{t('cancel')}</button>
-			<button class="btn" onclick={saveQuota}><Gauge size={15} /> {t('save')}</button>
+			<button class="btn" onclick={saveQuota}>{t('save')}</button>
 		</div>
 	</Modal>
 {/if}
+
+<style>
+	.ucard {
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		padding: 14px;
+		margin-bottom: 10px;
+		transition: border-color var(--speed);
+	}
+	.ucard:hover { border-color: var(--border-strong); }
+	.uc-main { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+	.uc-id { min-width: 240px; }
+	.uc-usage { flex: 1; min-width: 260px; }
+	.uc-keys { margin-top: 6px; display: flex; flex-direction: column; }
+	.uc-keys .kv { gap: 8px; }
+	.uc-actions { display: flex; flex-direction: column; gap: 6px; margin-left: auto; }
+	@media (max-width: 900px) {
+		.uc-main { flex-direction: column; }
+		.uc-actions { flex-direction: row; margin-left: 0; }
+	}
+</style>

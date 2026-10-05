@@ -84,6 +84,7 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("POST /api/admin/users", a.requireSession(a.handleCreateUser, store.RoleAdmin, true))
 	a.mux.HandleFunc("PATCH /api/admin/users/{id}", a.requireSession(a.handleUpdateUser, store.RoleAdmin, true))
 	a.mux.HandleFunc("DELETE /api/admin/users/{id}", a.requireSession(a.handleDeleteUser, store.RoleSuperAdmin, true))
+	a.mux.HandleFunc("GET /api/admin/users/usage", a.requireSession(a.handleUsersUsage, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/users/{id}/keys", a.requireSession(a.handleListKeys, store.RoleAdmin, false))
 	a.mux.HandleFunc("POST /api/admin/users/{id}/keys", a.requireSession(a.handleCreateKey, store.RoleAdmin, true))
 	a.mux.HandleFunc("DELETE /api/admin/keys/{id}", a.requireSession(a.handleDeleteKey, store.RoleAdmin, true))

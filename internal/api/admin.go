@@ -723,6 +723,24 @@ func (a *App) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"ok": "true"})
 }
 
+// handleUsersUsage agregat pemakaian AI per user untuk halaman User & Peran.
+func (a *App) handleUsersUsage(w http.ResponseWriter, r *http.Request) {
+	days := 7
+	if d, err := strconv.Atoi(r.URL.Query().Get("days")); err == nil && d > 0 && d <= 90 {
+		days = d
+	}
+	now := time.Now()
+	res, err := usage.GetAnalytics(a.st, now.AddDate(0, 0, -days), now)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if res.PerUser == nil {
+		res.PerUser = []usage.UserUsage{}
+	}
+	writeJSON(w, 200, map[string]any{"days": days, "per_user": res.PerUser})
+}
+
 func (a *App) handleListKeys(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
