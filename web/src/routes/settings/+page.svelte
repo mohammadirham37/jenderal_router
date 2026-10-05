@@ -16,6 +16,7 @@
 	// ---- Cloudflare Tunnel ----
 	let cf = $state<any>(null);
 	let cfLoading = $state(false);
+	let cfTab = $state<'daftar' | 'server'>('daftar');
 	async function loadCf() {
 		cfLoading = true;
 		try { cf = await api.get('/api/admin/system/cloudflare'); } catch (e: any) { toast(e.message, 'err'); }
@@ -25,7 +26,42 @@
 
 	function cfGuide(): string {
 		const addr = cf?.gateway_addr || '127.0.0.1:20130';
-		return `# 1) pasang cloudflared
+		if (cfTab === 'daftar') {
+			return `YANG HARUS DIDAFTARKAN DI DASHBOARD CLOUDFLARE
+=================================================
+
+1) DOMAIN AKTIF DI CLOUDFLARE
+   - Masuk dash.cloudflare.com → "Add a domain" → masukkan domain Anda
+   - Pilih paket FREE (cukup)
+   - Arahkan nameserver domain Anda ke 2 nameserver yang Cloudflare berikan
+     (di registrar tempat Anda membeli domain)
+   - Tunggu status domain: ACTIVE
+
+2) BUAT TUNNEL (tanpa CLI)
+   - Dashboard Cloudflare → menu "Zero Trust" (one-time setup singkat)
+   - Networks → Tunnels → "Create a tunnel"
+   - Pilih konektor "Cloudflared" → beri nama, mis. jenderal
+   - Di langkah "Install and run a connector": pilih Debian / 64-bit
+   - SALIN perintah yang ditampilkan — berisi token unik tunnel Anda:
+       sudo cloudflared service install <TOKEN-PANJANG>
+     (perintah ini sekaligus memasang service otomatis di server)
+
+3) DAFTARKAN HOSTNAME PUBLIK (masih di wizard yang sama)
+   - Subdomain : chat        Domain : domainanda.com
+   - Path      : (kosongkan)
+   - Service   : HTTP  →  URL: 127.0.0.1:20130
+   - Klik "Save tunnel"
+   → CNAME ke <ID>.cfargotunnel.com + sertifikat SSL dibuat OTOMATIS
+
+4) CEK STATUS
+   - Networks → Tunnels → tunnel "jenderal" harus berstatus HEALTHY
+   - Buka https://chat.domainanda.com — selesai, tanpa buka port`;
+		}
+		const addr = cf?.gateway_addr || '127.0.0.1:20130';
+		return `PEMASANGAN DI SERVER (metode CLI / lokal-managed)
+=================================================
+
+# 1) pasang cloudflared
 sudo curl -L --output /usr/local/bin/cloudflared \\
   https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
 sudo chmod +x /usr/local/bin/cloudflared
@@ -330,17 +366,17 @@ sudo systemctl start jenderalrouter</pre>
 		{/if}
 		<div class="row" style="margin:10px 0">
 			<button class="btn ghost sm" onclick={loadCf}><RefreshCw size={13} /> Periksa ulang</button>
-			<button class="btn ghost sm" onclick={copyCfGuide}><Copy size={13} /> Salin panduan</button>
+			<span class="grow"></span>
+			<button class="btn sm" class:ghost={cfTab !== 'daftar'} onclick={() => (cfTab = 'daftar')}>1. Daftar di Cloudflare</button>
+			<button class="btn sm" class:ghost={cfTab !== 'server'} onclick={() => (cfTab = 'server')}>2. Pemasangan di server</button>
+			<button class="btn ghost sm" onclick={copyCfGuide}><Copy size={13} /> Salin</button>
 		</div>
-		<details>
-			<summary class="small" style="cursor:pointer;font-weight:700">Langkah pemasangan (klik untuk lihat)</summary>
-			<pre class="logbox" style="margin-top:8px">{cfGuide()}</pre>
-			<p class="muted small" style="margin:8px 0 0">
-				Ganti <span class="mono">chat.domainanda.com</span> dengan subdomain Anda.
-				Streaming chat & API aman lewat tunnel (heartbeat otomatis); hindari mode
-				non-streaming untuk jawaban &gt;100 dtk — itu batas platform Cloudflare.
-			</p>
-		</details>
+		<pre class="logbox" style="max-height:340px;overflow:auto">{cfGuide()}</pre>
+		<p class="muted small" style="margin:8px 0 0">
+			Streaming chat & API aman lewat tunnel (heartbeat otomatis tiap 15 dtk);
+			hindari mode non-streaming untuk jawaban &gt;100 dtk — itu batas platform Cloudflare.
+			Tunnel juga otomatis membuat DNS (CNAME) + sertifikat SSL — tidak perlu membuka port.
+		</p>
 	{:else}
 		<button class="btn ghost sm" onclick={loadCf}>Periksa host</button>
 	{/if}
