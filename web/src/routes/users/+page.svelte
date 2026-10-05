@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Users, Plus, Trash2, KeyRound, Gauge, Copy, X } from '@lucide/svelte';
+	import { browser } from '$app/environment';
 	import { api } from '$lib/api';
 	import { t, toast } from '$lib/stores.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -44,6 +45,10 @@
 	let keyFor = $state<any>(null);
 	let kName = $state(''); let kAllowed = $state('*'); let kRpm = $state('60'); let kTpm = $state('0');
 	let plaintext = $state('');
+	let guideTab = $state<'opencode' | 'kilocode' | 'curl'>('opencode');
+	const baseURL = (browser ? window.location.origin : '') + '/v1';
+	const contohModel = 'local/Qwen3-30B-A3B-Q6_K';
+
 	async function createKey() {
 		if (!keyFor) return;
 		try {
@@ -56,6 +61,46 @@
 	}
 	async function copyKey() {
 		try { await navigator.clipboard.writeText(plaintext); toast('disalin ✓', 'ok'); } catch { /* */ }
+	}
+
+	// ---- panduan koneksi klien pihak ketiga ----
+	function guideText(): string {
+		const key = plaintext || 'sk-…';
+		if (guideTab === 'opencode') {
+			return JSON.stringify(
+				{
+					$schema: 'https://opencode.ai/config.json',
+					provider: {
+						jenderal: {
+							npm: '@ai-sdk/openai-compatible',
+							name: 'JenderalRouter (lokal)',
+							options: { baseURL, apiKey: key },
+							models: { [contohModel]: { name: 'Qwen3 30B (lokal)' } }
+						}
+					}
+				},
+				null,
+				2
+			);
+		}
+		if (guideTab === 'kilocode') {
+			return [
+				'Provider  : OpenAI Compatible',
+				'Base URL  : ' + baseURL,
+				'API Key   : ' + key,
+				'Model ID  : ' + contohModel,
+				'',
+				'(buka pengaturan Kilocode → pilih provider "OpenAI Compatible"',
+				' → isi kolom di atas → simpan → pilih model tersebut di chat)'
+			].join('\n');
+		}
+		return `curl ${baseURL}/chat/completions \\
+  -H "Authorization: Bearer ${key}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"${contohModel}","messages":[{"role":"user","content":"halo"}]}'`;
+	}
+	async function copyGuide() {
+		try { await navigator.clipboard.writeText(guideText()); toast('konfigurasi disalin ✓', 'ok'); } catch { /* */ }
 	}
 
 	// ---- kuota ----
@@ -153,27 +198,58 @@
 {#if keyFor}
 	<Modal title={`${t('api_key')} — ${keyFor.email}`} onclose={() => (keyFor = null)}>
 		{#if plaintext}
-			<p class="small" style="color:var(--ok);font-weight:700">⚠ {t('api_key')} hanya tampil sekali — salin sekarang!</p>
+			<div style="padding:10px 12px;border-radius:10px;background:color-mix(in srgb, var(--warn) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn) 40%, transparent);margin-bottom:10px">
+				<span class="small" style="color:var(--warn);font-weight:700">⚠ API key hanya tampil sekali — salin sekarang sebelum menutup!</span>
+			</div>
 			<div class="kv">
 				<code class="mono" style="background:var(--bg);padding:10px;border-radius:8px;word-break:break-all;flex:1">{plaintext}</code>
-				<button class="btn sm" onclick={copyKey}><Copy size={13} /></button>
+				<button class="btn sm" onclick={copyKey}><Copy size={13} /> Salin key</button>
 			</div>
+
+			<div style="border-top:1px solid var(--border);margin:16px 0 12px"></div>
+			<div class="small" style="font-weight:700;margin-bottom:2px">Cara pakai di aplikasi lain</div>
+			<p class="muted small" style="margin:0 0 8px">
+				API kompatibel OpenAI — Base URL: <code class="mono">{baseURL}</code>
+			</p>
+			<div class="row" style="margin-bottom:8px">
+				<button class="btn sm" class:ghost={guideTab !== 'opencode'} onclick={() => (guideTab = 'opencode')}>OpenCode</button>
+				<button class="btn sm" class:ghost={guideTab !== 'kilocode'} onclick={() => (guideTab = 'kilocode')}>Kilocode</button>
+				<button class="btn sm" class:ghost={guideTab !== 'curl'} onclick={() => (guideTab = 'curl')}>curl</button>
+				<span class="grow"></span>
+				<button class="btn ghost sm" onclick={copyGuide}><Copy size={13} /> Salin</button>
+			</div>
+			<pre class="logbox" style="max-height:280px;overflow:auto">{guideText()}</pre>
+			<p class="muted small" style="margin:8px 0 0">
+				Klien OpenAI-compatible lain (Cline, Roo Code, Cherry Studio, dll) tinggal diisi
+				Base URL + API Key yang sama.
+			</p>
 		{:else}
 			<label>{t('name')}</label>
-			<input bind:value={kName} placeholder="kunci budi" />
-			<label>Model diizinkan (* = semua)</label>
-			<input bind:value={kAllowed} />
-			<label>RPM</label>
-			<input bind:value={kRpm} />
-			<label>TPM</label>
-			<input bind:value={kTpm} />
+			<input bind:value={kName} placeholder="kunci {keyFor.email.split('@')[0]}" />
+			<label>Model diizinkan</label>
+			<input bind:value={kAllowed} placeholder="* (semua) atau local/Qwen3-30B-A3B-Q6_K, local/GLM-4.7-Flash-Q6_K" />
+			<p class="muted small" style="margin:4px 0 0">format <span class="mono">prefix/model</span>, pisah dengan koma — <span class="mono">*</span> = semua model</p>
+			<div class="row">
+				<div class="grow">
+					<label>RPM (request/menit)</label>
+					<input bind:value={kRpm} placeholder="60" />
+				</div>
+				<div class="grow">
+					<label>TPM (token/menit, 0 = tanpa batas)</label>
+					<input bind:value={kTpm} placeholder="0" />
+				</div>
+			</div>
+			<div style="padding:10px 12px;border-radius:10px;background:var(--surface-2);border:1px solid var(--border);margin-top:12px">
+				<div class="small" style="font-weight:700;margin-bottom:2px">API kompatibel OpenAI</div>
+				<div class="muted small">Base URL: <code class="mono">{baseURL}</code> — panduan koneksi (OpenCode, Kilocode, curl) tampil setelah key dibuat.</div>
+			</div>
 		{/if}
 		<div class="modal-actions">
-			<button class="btn ghost" onclick={() => (keyFor = null)}>{t('cancel')}</button>
 			{#if plaintext}
 				<button class="btn" onclick={() => (keyFor = null)}>Selesai</button>
 			{:else}
-				<button class="btn" onclick={createKey}><KeyRound size={15} /> {t('save')}</button>
+				<button class="btn ghost" onclick={() => (keyFor = null)}>{t('cancel')}</button>
+				<button class="btn" onclick={createKey}><KeyRound size={14} /> Buat API key</button>
 			{/if}
 		</div>
 	</Modal>
