@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Gauge, KeyRound, Copy, Activity, RefreshCw, Bot } from '@lucide/svelte';
 	import { browser } from '$app/environment';
-	import { api } from '$lib/api';
+	import { api, fmtTs } from '$lib/api';
 	import { copyText } from '$lib/clipboard';
 	import { t, toast } from '$lib/stores.svelte';
 	import Stat from '$lib/components/Stat.svelte';
@@ -125,9 +125,6 @@
 		(await copyText(guideSnippet)) ? toast('konfigurasi disalin ✓', 'ok') : toast('gagal menyalin', 'err');
 	}
 
-	function fmtTs(ts: string): string {
-		return (ts || '').replace('T', ' ').slice(0, 19);
-	}
 </script>
 
 <svelte:head><title>{t('usage_api')} — JenderalRouter</title></svelte:head>

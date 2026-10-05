@@ -2,6 +2,7 @@
 	import { Settings, Save, Database, Rocket, RefreshCw, ScrollText, Copy, Globe } from '@lucide/svelte';
 	import { api } from '$lib/api';
 	import { copyText } from '$lib/clipboard';
+	import { fmtTs } from '$lib/api';
 	import { t, toast } from '$lib/stores.svelte';
 
 	// ---- notifikasi ----
@@ -385,7 +386,7 @@ sudo systemctl start jenderalrouter</pre>
 	<h2><ScrollText size={15} /> {t('audit_log')}</h2>
 	{#each audit as a (a.id)}
 		<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0">
-			<span class="muted mono" style="min-width:150px">{(a.ts || '').replace('T', ' ').slice(0, 19)}</span>
+			<span class="muted mono" style="min-width:150px">{fmtTs(a.ts)}</span>
 			<span class="mono">{a.action}</span>
 			<span class="muted">{a.target}</span>
 		</div>

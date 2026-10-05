@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { ChartLine, Activity, Coins, AlertTriangle, Hash, Cpu, MemoryStick, HardDrive, Gauge, KeyRound } from '@lucide/svelte';
-	import { api, fmtNum, fmtCost, truncate } from '$lib/api';
+	import { api, fmtNum, fmtCost, truncate, fmtTs } from '$lib/api';
 	import { app, t, toast, roleAtLeast } from '$lib/stores.svelte';
 	import Stat from '$lib/components/Stat.svelte';
 
@@ -117,7 +117,7 @@
 				<tbody>
 					{#each myLogs as l (l.id)}
 						<tr>
-							<td class="mono">{(l.ts || '').replace('T', ' ').slice(0, 19)}</td>
+							<td class="mono">{fmtTs(l.ts)}</td>
 							<td class="mono">{l.requested_model}</td>
 							<td><span class="badge {l.status >= 200 && l.status < 400 ? 'ok' : 'err'}">{l.status}</span></td>
 							<td>{l.latency_ms} ms</td>
@@ -177,7 +177,7 @@
 				{:else}
 					<span class="muted">tidak terdeteksi</span>
 				{/if}
-				<span class="muted" style="margin-left:auto">diperbarui {sys.updated_at?.replace('T', ' ').slice(11, 19)} UTC</span>
+				<span class="muted" style="margin-left:auto">diperbarui {fmtTs(sys.updated_at)}</span>
 			</div>
 		{:else if sys}
 			<span class="muted small">Statistik sistem hanya tersedia di Linux.</span>
@@ -207,7 +207,7 @@
 				<tbody>
 					{#each logs as l (l.id)}
 						<tr>
-							<td class="mono">{(l.ts || '').replace('T', ' ').slice(0, 19)}</td>
+							<td class="mono">{fmtTs(l.ts)}</td>
 							<td class="mono">{truncate(l.requested_model, 28)}</td>
 							<td>{l.provider_name}</td>
 							<td>

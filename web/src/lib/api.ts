@@ -125,6 +125,22 @@ export function truncate(s: string, n: number): string {
 	return s.length <= n ? s : s.slice(0, n) + '…';
 }
 
+// waktu server (UTC RFC3339) → tampilan WIB (Asia/Jakarta)
+const TZ = 'Asia/Jakarta';
+export function fmtTs(ts: string | undefined | null): string {
+	if (!ts) return '';
+	const d = new Date(ts);
+	if (isNaN(d.getTime())) return ts;
+	const p = new Intl.DateTimeFormat('en-GB', {
+		timeZone: TZ,
+		year: 'numeric', month: '2-digit', day: '2-digit',
+		hour: '2-digit', minute: '2-digit', second: '2-digit',
+		hour12: false
+	}).formatToParts(d);
+	const g = (t: string) => p.find((x) => x.type === t)?.value ?? '';
+	return `${g('year')}-${g('month')}-${g('day')} ${g('hour')}:${g('minute')}:${g('second')} WIB`;
+}
+
 // markdown mini → html (heading, bold, italic, code, list, link)
 export function md(src: string): string {
 	const esc = (x: string) =>

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { ScrollText, RefreshCw, Download } from '@lucide/svelte';
-	import { api, fmtCost } from '$lib/api';
+	import { api, fmtCost, fmtTs } from '$lib/api';
 	import { t } from '$lib/stores.svelte';
 
 	let logs = $state<any[]>([]);
@@ -60,7 +60,7 @@
 			<tbody>
 				{#each logs as l (l.id)}
 					<tr>
-						<td class="mono">{(l.ts || '').replace('T', ' ').slice(0, 19)}</td>
+						<td class="mono">{fmtTs(l.ts)}</td>
 						<td class="mono">{l.requested_model}</td>
 						<td>{l.provider_name}</td>
 						<td class="mono">{l.model_name}</td>
