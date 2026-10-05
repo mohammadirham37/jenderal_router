@@ -130,9 +130,14 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("POST /api/me/chat", a.requireSession(a.handleMeChat, store.RoleMember, true))
 	a.mux.HandleFunc("GET /api/me/usage", a.requireSession(a.handleMeUsage, store.RoleMember, false))
 	a.mux.HandleFunc("GET /api/me/keys", a.requireSession(a.handleMeKeys, store.RoleMember, false))
+	a.mux.HandleFunc("POST /api/me/keys", a.requireSession(a.handleMeCreateKey, store.RoleMember, true))
 	a.mux.HandleFunc("GET /api/me/keys/{id}/reveal", a.requireSession(a.handleMeRevealKey, store.RoleMember, false))
 	a.mux.HandleFunc("GET /api/me/logs", a.requireSession(a.handleMeLogs, store.RoleMember, false))
 	a.mux.HandleFunc("POST /api/me/tools/webfetch", a.requireSession(a.handleToolWebFetch, store.RoleMember, true))
+
+	// login OAuth Google — publik (mulai + callback)
+	a.mux.HandleFunc("GET /google/auth", a.handleGoogleAuth)
+	a.mux.HandleFunc("GET /google/callback", a.handleGoogleCallback)
 }
 
 // ---- sesi & middleware ----

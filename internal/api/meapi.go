@@ -26,6 +26,41 @@ func (a *App) handleMeKeys(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"keys": keys})
 }
 
+// handleMeCreateKey member membuat API key untuk DIRINYA SENDIRI.
+// Aturan: 1 user = 1 key aktif (key yang dicabut tidak dihitung).
+func (a *App) handleMeCreateKey(w http.ResponseWriter, r *http.Request) {
+	ai := authFrom(r)
+	keys, err := a.st.ListKeysByUser(ai.user.ID)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	for _, k := range keys {
+		if k.RevokedAt == "" {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": "Anda sudah punya API key aktif — hapus/cabut yang lama dulu bila ingin mengganti"})
+			return
+		}
+	}
+	plain, hash, err := newAPIKey()
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	enc, encErr := a.st.EncryptSecret(plain)
+	if encErr != nil {
+		enc = ""
+	}
+	k, err := a.st.CreateAPIKey(ai.user.ID, "kunci", plain, hash, enc, "*", "", 0, 0, "")
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	a.gate.InvalidateKey(hash)
+	a.audit(r, "key.create.self", "keys/"+fmtInt(k.ID), nil, map[string]string{"prefix": k.Prefix})
+	writeJSON(w, 201, map[string]any{"key": k, "plaintext": plain})
+}
+
 // handleMeRevealKey membuka plaintext key MILIK SENDIRI (untuk tombol salin).
 func (a *App) handleMeRevealKey(w http.ResponseWriter, r *http.Request) {
 	ai := authFrom(r)

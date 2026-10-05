@@ -24,6 +24,10 @@
 	let guideKey = $state<number | 'manual'>('manual');
 	let manualKey = $state('');
 	let guideTab = $state<'opencode' | 'kilocode' | 'curl'>('opencode');
+	// key baru hasil generate — plaintext hanya tampil sekali
+	let newKeyPlain = $state('');
+	let newKeyId = $state<number | null>(null);
+	let generating = $state(false);
 
 	$effect(() => {
 		(async () => {
@@ -46,6 +50,28 @@
 
 	const today = $derived(usage?.today ?? {});
 	const activeKeys = $derived(keys.filter((k) => !k.revoked_at));
+
+	// generate API key untuk diri sendiri (1 user = 1 key aktif)
+	async function generateKey() {
+		generating = true;
+		try {
+			const r = await api.post('/api/me/keys', {});
+			newKeyPlain = r.plaintext;
+			newKeyId = r.key.id;
+			revealed[r.key.id] = r.plaintext;
+			selectedKeyId = r.key.id;
+			const res = await api.get('/api/me/keys');
+			keys = res.keys || [];
+			toast('API key berhasil dibuat ✓', 'ok');
+		} catch (e: any) {
+			toast(e.message, 'err');
+		} finally {
+			generating = false;
+		}
+	}
+	async function copyNewKey() {
+		(await copyText(newKeyPlain)) ? toast('key disalin ✓', 'ok') : toast('gagal menyalin — salin manual', 'err');
+	}
 
 	async function copyKey(k: Key) {
 		try {
@@ -148,6 +174,15 @@
 
 	<div class="card" style="margin-top:14px">
 		<h2><KeyRound size={15} /> API Key saya</h2>
+		{#if newKeyPlain}
+			<div style="padding:12px;border-radius:10px;background:color-mix(in srgb, var(--warn) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn) 40%, transparent);margin-bottom:12px">
+				<div class="small" style="color:var(--warn);font-weight:700;margin-bottom:6px">⚠ API key hanya tampil sekali — salin sekarang!</div>
+				<div class="kv">
+					<code class="mono" style="background:var(--bg);padding:10px;border-radius:8px;word-break:break-all;flex:1">{newKeyPlain}</code>
+					<button class="btn sm" onclick={copyNewKey}><Copy size={13} /> Salin</button>
+				</div>
+			</div>
+		{/if}
 		{#each keys as k (k.id)}
 			<div class="kv" style="border-bottom:1px solid var(--border);padding:7px 0">
 				<span class="mono small">{k.prefix}…</span>
@@ -164,10 +199,17 @@
 				{/if}
 			</div>
 		{:else}
-			<div class="muted small" style="padding:8px 0">
-				Belum punya API key — minta admin membuatkan lewat halaman User &amp; Peran.
-			</div>
+			<div class="muted small" style="padding:8px 0">Belum punya API key — buat sendiri sekarang:</div>
 		{/each}
+		{#if activeKeys.length === 0}
+			<div style="margin-top:10px">
+				<button class="btn" onclick={generateKey} disabled={generating}>
+					{#if generating}<span class="spinner"></span>{:else}<KeyRound size={14} />{/if}
+					Generate API Key
+				</button>
+				<div class="muted small" style="margin-top:6px">1 user = 1 API key aktif. Key lama yang dicabut tidak dihitung.</div>
+			</div>
+		{/if}
 		<div class="kv small" style="margin-top:8px">
 			<span class="muted">Base URL:</span><span class="mono">{baseURL}</span>
 		</div>
