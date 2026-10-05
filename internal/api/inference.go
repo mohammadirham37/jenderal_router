@@ -234,7 +234,10 @@ func (sr *stepRun) timeout() time.Duration {
 		if sr.settings.ColdStartTimeoutMs > 0 {
 			return time.Duration(sr.settings.ColdStartTimeoutMs) * time.Millisecond
 		}
-		return 120 * time.Second
+		// generasi lokal di CPU bisa sangat lambat (jawaban panjang 3-5 menit)
+		// dan cold start memuat model puluhan GB — 120 dtk hampir pasti
+		// memotong stream di tengah jawaban (terlihat sebagai 502 di akhir).
+		return 600 * time.Second
 	}
 	if sr.step.TimeoutMs > 0 {
 		return time.Duration(sr.step.TimeoutMs) * time.Millisecond
