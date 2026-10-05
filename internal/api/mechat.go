@@ -46,17 +46,20 @@ func (a *App) handleMeModels(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleMeUsage(w http.ResponseWriter, r *http.Request) {
 	ai := authFrom(r)
 	type quotaView struct {
-		Period     string  `json:"period"`
-		TokenLimit int64   `json:"token_limit"`
-		UsedTokens int64   `json:"used_tokens"`
-		CostLimit  float64 `json:"cost_limit_usd"`
-		UsedCost   float64 `json:"used_cost_usd"`
-		ResetAt    string  `json:"reset_at"`
+		Period       string  `json:"period"`
+		TokenLimit   int64   `json:"token_limit"`
+		UsedTokens   int64   `json:"used_tokens"`
+		RequestLimit int64   `json:"request_limit"`
+		UsedRequests int64   `json:"used_requests"`
+		CostLimit    float64 `json:"cost_limit_usd"`
+		UsedCost     float64 `json:"used_cost_usd"`
+		ResetAt      string  `json:"reset_at"`
 	}
 	quotas := []quotaView{}
 	for _, q := range collectUserKeyQuotas(a.st, ai.user.ID, 0) {
 		quotas = append(quotas, quotaView{Period: q.Period, TokenLimit: q.TokenLimit,
-			UsedTokens: q.UsedTokens, CostLimit: q.CostLimitUSD, UsedCost: q.UsedCost, ResetAt: q.ResetAt})
+			UsedTokens: q.UsedTokens, RequestLimit: q.RequestLimit, UsedRequests: q.UsedRequests,
+			CostLimit: q.CostLimitUSD, UsedCost: q.UsedCost, ResetAt: q.ResetAt})
 	}
 	now := time.Now()
 	from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)

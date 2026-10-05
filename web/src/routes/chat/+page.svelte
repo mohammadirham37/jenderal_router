@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { Plus, Send, Trash2, X, Bot, Sparkles, History, Globe } from '@lucide/svelte';
-	import { api, md, fmtTs } from '$lib/api';
+	import { Plus, Send, Trash2, X, Bot, Sparkles, History, Globe, Activity, Gauge } from '@lucide/svelte';
+	import { api, md, fmtTs, fmtNum } from '$lib/api';
 	import { t, toast } from '$lib/stores.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 
@@ -21,6 +21,29 @@
 	let quota = $state<any>(null);
 	let msgsEl = $state<HTMLElement | null>(null);
 	let showHistory = $state(false);
+
+	// ringkasan kuota utk toolbar: constraint paling menekan yang ditampilkan;
+	// limit 0 (atau tanpa baris kuota) = unlimited
+	const quotaInfo = $derived.by(() => {
+		if (!quota) return null;
+		const list: { period: string; unit: 'req' | 'token' | 'usd'; used: number; limit: number; pct: number; left: string }[] = [];
+		for (const q of quota.quotas ?? []) {
+			const dims: ['req' | 'token' | 'usd', number, number, (v: number) => string][] = [
+				['req', q.used_requests ?? 0, q.request_limit ?? 0, (v) => fmtNum(v)],
+				['token', q.used_tokens ?? 0, q.token_limit ?? 0, (v) => fmtNum(v)],
+				['usd', q.used_cost_usd ?? 0, q.cost_limit_usd ?? 0, (v) => '$' + v.toFixed(2)]
+			];
+			for (const [unit, used, limit, fmt] of dims) {
+				if (limit > 0) {
+					const pct = Math.round((used / limit) * 100);
+					list.push({ period: q.period, unit, used, limit, pct, left: fmt(Math.max(0, limit - used)) + (unit === 'usd' ? '' : ' ' + unit) });
+				}
+			}
+		}
+		list.sort((a, b) => b.pct - a.pct);
+		return { list, tightest: list[0] ?? null, unlimited: list.length === 0, totalReq: quota.today?.requests ?? 0 };
+	});
+	const periodLabel = (p: string) => (p === 'month' ? 'bulanan' : 'harian');
 
 	// tool bawaan: web_fetch — dieksekusi sisi server (guard SSRF aktif)
 	const TOOLS = [{
@@ -269,8 +292,22 @@
 		<span class="badge info tool-badge" title="Model bisa memanggil web_fetch untuk membaca halaman web">
 			<Globe size={11} /> web_fetch
 		</span>
-		{#if quota}
-			<span class="muted small">Sisa kuota: {quota.today?.requests ?? 0} req</span>
+		{#if quotaInfo}
+			<span class="badge info quota-chip" title="Total request Anda hari ini (reset tengah malam WIB)">
+				<Activity size={11} /> {fmtNum(quotaInfo.totalReq)} req hari ini
+			</span>
+			{#if quotaInfo.unlimited}
+				<span class="badge ok quota-chip" title="Akun Anda tidak memiliki batas kuota">
+					<Gauge size={11} /> Sisa kuota: unlimited
+				</span>
+			{:else if quotaInfo.tightest}
+				<span
+					class="badge {quotaInfo.tightest.pct >= 100 ? 'err' : quotaInfo.tightest.pct >= 80 ? 'warn' : 'ok'} quota-chip"
+					title={quotaInfo.list.map((c) => `${c.unit} ${periodLabel(c.period)}: ${fmtNum(c.used)} / ${fmtNum(c.limit)} terpakai`).join('\n')}
+				>
+					<Gauge size={11} /> Sisa kuota: {quotaInfo.tightest.left} ({periodLabel(quotaInfo.tightest.period)})
+				</span>
+			{/if}
 		{/if}
 	</div>
 
@@ -366,6 +403,7 @@
 	}
 	.model-select { max-width: 340px; min-width: 200px; }
 	.tool-badge { cursor: help; }
+	.quota-chip { cursor: help; white-space: nowrap; }
 	.chat-pane {
 		flex: 1;
 		display: flex;
