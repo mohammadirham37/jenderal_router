@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 )
 
 // Conversation percakapan playground milik user (FR-7.2/7.3).
@@ -175,7 +176,8 @@ func (s *Store) DeleteConversation(id int64) error {
 	return nil
 }
 
-// AddMessage menambah pesan ke percakapan.
+// AddMessage menambah pesan ke percakapan. Pesan user pertama otomatis
+// menamai percakapan yang masih memakai judul bawaan.
 func (s *Store) AddMessage(conversationID int64, role, content, model, providerName string) (*Message, error) {
 	res, err := s.DB.Exec(`INSERT INTO messages (conversation_id, role, content, model, provider_name) VALUES (?,?,?,?,?)`,
 		conversationID, role, content, model, providerName)
@@ -185,7 +187,49 @@ func (s *Store) AddMessage(conversationID int64, role, content, model, providerN
 	id, _ := res.LastInsertId()
 	m := &Message{ID: id, ConversationID: conversationID, Role: role, Content: content,
 		Model: model, ProviderName: providerName}
+	s.autoTitle(conversationID, role, content)
 	return m, nil
+}
+
+// isDefaultTitle judul bawaan yang boleh ditimpa judul otomatis.
+func isDefaultTitle(t string) bool {
+	switch t {
+	case "", "Chat baru", "New chat", "Percakapan baru":
+		return true
+	}
+	return false
+}
+
+// autoTitle menamai percakapan dari pertanyaan user pertama.
+func (s *Store) autoTitle(conversationID int64, role, content string) {
+	if role != "user" {
+		return
+	}
+	var title string
+	if err := s.DB.QueryRow(`SELECT title FROM conversations WHERE id = ?`, conversationID).Scan(&title); err != nil || !isDefaultTitle(title) {
+		return
+	}
+	t := strings.TrimSpace(strings.ReplaceAll(content, "\n", " "))
+	if t == "" {
+		return
+	}
+	if r := []rune(t); len(r) > 48 {
+		t = string(r[:48]) + "…"
+	}
+	_, _ = s.DB.Exec(`UPDATE conversations SET title = ? WHERE id = ?`, t, conversationID)
+}
+
+// RepairConversationTitles backfill sekali jalan: percakapan lama yang
+// masih berjudul bawaan dinamai dari pertanyaan user pertamanya.
+// Idempoten — baris tanpa judul default tidak tersentuh.
+func (s *Store) RepairConversationTitles() {
+	s.DB.Exec(`UPDATE conversations SET title = (
+		SELECT substr(replace(content, char(10), ' '), 1, 48)
+		FROM messages
+		WHERE conversation_id = conversations.id AND role = 'user'
+		ORDER BY id LIMIT 1
+	) WHERE title IN ('', 'Chat baru', 'New chat', 'Percakapan baru')
+	  AND EXISTS (SELECT 1 FROM messages WHERE conversation_id = conversations.id AND role = 'user')`)
 }
 
 // ListMessages pesan percakapan urut waktu.

@@ -22,7 +22,9 @@ func New(pathOrURL string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{DB: d}, nil
+	s := &Store{DB: d}
+	s.RepairConversationTitles()
+	return s, nil
 }
 
 // NewInMemory untuk pengujian.
@@ -31,7 +33,9 @@ func NewInMemory() (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{DB: d}, nil
+	s := &Store{DB: d}
+	s.RepairConversationTitles()
+	return s, nil
 }
 
 // Close menutup koneksi database.

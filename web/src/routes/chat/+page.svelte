@@ -110,12 +110,6 @@
 			if (!bubble.content) bubble.content = '(kosong)';
 			await api.post(`/api/me/conversations/${current}/messages`, { role: 'user', content: text });
 			await api.post(`/api/me/conversations/${current}/messages`, { role: 'assistant', content: bubble.content, model });
-			// judul dari pesan pertama bila masih default — supaya daftar di sidebar bermakna
-			const conv = conversations.find((c) => c.id === current);
-			if (conv && (!conv.title || conv.title === t('new_chat') || conv.title === 'Chat baru' || conv.title === 'New chat')) {
-				const title = text.length > 48 ? text.slice(0, 48) + '…' : text;
-				try { await api.patch(`/api/me/conversations/${current}`, { title }); } catch { /* */ }
-			}
 			loadQuota();
 			loadConversations();
 		} catch (e: any) {
