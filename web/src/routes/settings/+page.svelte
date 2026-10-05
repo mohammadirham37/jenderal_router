@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Settings, Save, Database, Rocket, RefreshCw, ScrollText, Copy } from '@lucide/svelte';
 	import { api } from '$lib/api';
+	import { copyText } from '$lib/clipboard';
 	import { t, toast } from '$lib/stores.svelte';
 
 	// ---- notifikasi ----
@@ -25,11 +26,11 @@
 			'sudo rm -f ' + p,
 			'sudo systemctl start jenderalrouter'
 		].join('\n');
-		navigator.clipboard.writeText(cmd).then(() => toast('perintah disalin ✓', 'ok')).catch(() => {});
+		copyText(cmd).then((ok) => toast(ok ? 'perintah disalin ✓' : 'gagal menyalin — salin manual', ok ? 'ok' : 'err'));
 	}
 	function copyHelperCommand() {
 		const cmd = 'sudo /usr/local/bin/jenderalrouter install-update-helper';
-		navigator.clipboard.writeText(cmd).then(() => toast('perintah disalin ✓', 'ok')).catch(() => {});
+		copyText(cmd).then((ok) => toast(ok ? 'perintah disalin ✓' : 'gagal menyalin — salin manual', ok ? 'ok' : 'err'));
 	}
 
 	// pasang binary hasil stage + restart service lewat helper (tanpa SSH)

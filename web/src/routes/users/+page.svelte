@@ -2,6 +2,7 @@
 	import { Users, Plus, Trash2, KeyRound, Gauge, Copy, X } from '@lucide/svelte';
 	import { browser } from '$app/environment';
 	import { api } from '$lib/api';
+	import { copyText } from '$lib/clipboard';
 	import { t, toast } from '$lib/stores.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 
@@ -60,7 +61,7 @@
 		} catch (e: any) { toast(e.message, 'err'); }
 	}
 	async function copyKey() {
-		try { await navigator.clipboard.writeText(plaintext); toast('disalin ✓', 'ok'); } catch { /* */ }
+		(await copyText(plaintext)) ? toast('disalin ✓', 'ok') : toast('gagal menyalin — blok teksnya dan salin manual', 'err');
 	}
 
 	// ---- panduan koneksi klien pihak ketiga ----
@@ -100,7 +101,7 @@
   -d '{"model":"${contohModel}","messages":[{"role":"user","content":"halo"}]}'`;
 	}
 	async function copyGuide() {
-		try { await navigator.clipboard.writeText(guideText()); toast('konfigurasi disalin ✓', 'ok'); } catch { /* */ }
+		(await copyText(guideText())) ? toast('konfigurasi disalin ✓', 'ok') : toast('gagal menyalin — salin manual dari kotak konfigurasi', 'err');
 	}
 
 	// ---- kuota ----
