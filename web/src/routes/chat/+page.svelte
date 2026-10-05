@@ -21,6 +21,8 @@
 				const [m, q] = await Promise.all([api.get('/api/me/models'), api.get('/api/me/usage')]);
 				models = m.models || [];
 				model = models[0]?.id ?? '';
+				const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('jr_chat_model') : null;
+				if (saved && models.some((x) => x.id === saved)) model = saved;
 				quota = q;
 			} catch (e: any) {
 				toast(e.message, 'err');
@@ -29,10 +31,19 @@
 		})();
 	});
 
+	// ingat pilihan model antar-kunjungan
+	$effect(() => {
+		if (model) try { localStorage.setItem('jr_chat_model', model); } catch { /* */ }
+	});
+
 	async function loadConversations() {
 		try {
 			const res = await api.get('/api/me/conversations');
 			conversations = res.conversations || [];
+			// pulihkan sesi: buka percakapan terakhir bila belum ada yang terbuka
+			if (current === null && conversations.length > 0) {
+				await openConversation(conversations[0].id);
+			}
 		} catch { /* */ }
 	}
 	async function loadQuota() {
@@ -99,6 +110,12 @@
 			if (!bubble.content) bubble.content = '(kosong)';
 			await api.post(`/api/me/conversations/${current}/messages`, { role: 'user', content: text });
 			await api.post(`/api/me/conversations/${current}/messages`, { role: 'assistant', content: bubble.content, model });
+			// judul dari pesan pertama bila masih default — supaya daftar di sidebar bermakna
+			const conv = conversations.find((c) => c.id === current);
+			if (conv && (!conv.title || conv.title === t('new_chat') || conv.title === 'Chat baru' || conv.title === 'New chat')) {
+				const title = text.length > 48 ? text.slice(0, 48) + '…' : text;
+				try { await api.patch(`/api/me/conversations/${current}`, { title }); } catch { /* */ }
+			}
 			loadQuota();
 			loadConversations();
 		} catch (e: any) {
