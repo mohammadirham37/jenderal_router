@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jenderal/jenderalrouter/internal/router"
@@ -150,11 +151,19 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
+
+	// keep-alive untuk proksi berbatas idle (Cloudflare Tunnel/nginx):
+	// komentar SSE berkala + tulisan instan agar byte pertama < 100 dtk.
+	var wmu sync.Mutex
+	fmt.Fprint(w, ": ok\n\n")
 	if flusher != nil {
 		flusher.Flush()
 	}
+	ka := startSSEKeepAlive(w, &wmu, 15*time.Second)
+	defer ka.Stop()
 
 	exec := newStepExecutor(a, internal, internal.Stream)
 	runner := &router.Runner{Breakers: a.breakers, Sender: exec.send, MaxRetrySameProvider: 1}
@@ -165,6 +174,7 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 		rec.Status = status
 		rec.LatencyMs = time.Since(start).Milliseconds()
 		a.rec.Record(rec)
+		wmu.Lock()
 		fmt.Fprintf(w, "data: %s\n\n", jsonCompact(map[string]any{
 			"error": map[string]any{"message": msg, "attempts": len(attempts)},
 		}))
@@ -172,6 +182,7 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 		if flusher != nil {
 			flusher.Flush()
 		}
+		wmu.Unlock()
 	}
 	if runErr != nil {
 		fail(statusForError(runErr), runErr.Error())
@@ -202,6 +213,7 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 			}
 			switch e.Type {
 			case translate.EventDelta:
+				wmu.Lock()
 				if first {
 					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, map[string]any{"role": "assistant", "content": ""}))
 					first = false
@@ -214,6 +226,7 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 					content.WriteString(e.Delta.Text)
 					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, map[string]any{"content": e.Delta.Text}))
 				}
+				wmu.Unlock()
 			case translate.EventUsage:
 				if e.Usage != nil {
 					tokensIn, tokensOut = e.Usage.PromptTokens, e.Usage.CompletionTokens
@@ -240,11 +253,13 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 		if reasoning.Len() > 0 {
 			meta["reasoning_content"] = reasoning.String()
 		}
+		wmu.Lock()
 		fmt.Fprintf(w, "data: %s\n\n", jsonCompact(meta))
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		if flusher != nil {
 			flusher.Flush()
 		}
+		wmu.Unlock()
 	} else {
 		resp := res.Response
 		content.WriteString(resp.Content)
@@ -262,11 +277,13 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 		if servedModel != "" {
 			chunk["served_model"] = servedModel
 		}
+		wmu.Lock()
 		fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, chunk))
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		if flusher != nil {
 			flusher.Flush()
 		}
+		wmu.Unlock()
 	}
 	res.Stream.Close()
 	rec.Status = http.StatusOK

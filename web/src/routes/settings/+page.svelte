@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Settings, Save, Database, Rocket, RefreshCw, ScrollText, Copy } from '@lucide/svelte';
+	import { Settings, Save, Database, Rocket, RefreshCw, ScrollText, Copy, Globe } from '@lucide/svelte';
 	import { api } from '$lib/api';
 	import { copyText } from '$lib/clipboard';
 	import { t, toast } from '$lib/stores.svelte';
@@ -11,6 +11,43 @@
 			await api.put('/api/admin/settings', { notification_telegram_token: tgToken, notification_chat_id: tgChat });
 			toast(t('save') + ' ✓', 'ok');
 		} catch (e: any) { toast(e.message, 'err'); }
+	}
+
+	// ---- Cloudflare Tunnel ----
+	let cf = $state<any>(null);
+	let cfLoading = $state(false);
+	async function loadCf() {
+		cfLoading = true;
+		try { cf = await api.get('/api/admin/system/cloudflare'); } catch (e: any) { toast(e.message, 'err'); }
+		cfLoading = false;
+	}
+	$effect(() => { loadCf(); });
+
+	function cfGuide(): string {
+		const addr = cf?.gateway_addr || '127.0.0.1:20130';
+		return `# 1) pasang cloudflared
+sudo curl -L --output /usr/local/bin/cloudflared \\
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+sudo chmod +x /usr/local/bin/cloudflared
+
+# 2) autentikasi & buat tunnel (butuh akun Cloudflare + domain)
+cloudflared tunnel login
+cloudflared tunnel create jenderal
+
+# 3) /etc/cloudflared/config.yml
+tunnel: <ID-tunnel>
+credentials-file: /root/.cloudflared/<ID-tunnel>.json
+ingress:
+  - hostname: chat.domainanda.com
+    service: http://${addr}
+  - service: http_status:404
+
+# 4) daftarkan DNS & jalankan sebagai service
+cloudflared tunnel route dns jenderal chat.domainanda.com
+sudo cloudflared service install`;
+	}
+	async function copyCfGuide() {
+		(await copyText(cfGuide())) ? toast('panduan disalin ✓', 'ok') : toast('gagal menyalin — salin manual', 'err');
 	}
 
 	// ---- backup ----
@@ -253,6 +290,59 @@ sudo systemctl start jenderalrouter</pre>
 		{#if (job?.job?.log?.length || updLog)}
 			<pre class="logbox" style="margin-top:10px">{job?.job ? job.job.log.join('\n') : updLog}</pre>
 		{/if}
+	{/if}
+</div>
+
+<div class="card">
+	<h2><Globe size={15} /> Cloudflare Tunnel</h2>
+	<p class="muted small" style="margin:0 0 10px">
+		Akses web UI & API dari internet tanpa membuka port — lewat tunnel Cloudflare.
+		Streaming chat sudah mengirim heartbeat berkala, jadi batas idle Cloudflare
+		(~100 dtk) dan cloudflared (~90 dtk) tidak memutus jawaban panjang.
+	</p>
+	{#if cfLoading && !cf}
+		<span class="muted small"><span class="spinner dark"></span> memeriksa cloudflared di host…</span>
+	{:else if cf}
+		<div class="kv small" style="margin-bottom:10px">
+			<span class="muted" style="min-width:170px">Binary cloudflared:</span>
+			<span>{cf.installed ? '✓ terpasang' : '✗ belum terpasang'}</span>
+		</div>
+		<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0">
+			<span class="muted" style="min-width:170px">Service systemd:</span>
+			{#if cf.service_state === 'active'}<span class="badge ok"><span class="dot"></span>active</span>
+			{:else if cf.service_state}<span class="badge warn">{cf.service_state}</span>
+			{:else}<span class="muted">belum ada</span>{/if}
+		</div>
+		<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0">
+			<span class="muted" style="min-width:170px">Proses tunnel:</span>
+			{#if cf.running}<span class="badge ok"><span class="dot pulse"></span>berjalan</span>
+			{:else}<span class="badge warn">tidak berjalan</span>{/if}
+		</div>
+		{#if cf.config_found}
+			<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0">
+				<span class="muted" style="min-width:170px">Hostname:</span>
+				<span class="mono">{cf.hostname || '—'}</span>
+			</div>
+			<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0">
+				<span class="muted" style="min-width:170px">Ingress ke:</span>
+				<span class="mono">{cf.ingress_service || '—'}</span>
+			</div>
+		{/if}
+		<div class="row" style="margin:10px 0">
+			<button class="btn ghost sm" onclick={loadCf}><RefreshCw size={13} /> Periksa ulang</button>
+			<button class="btn ghost sm" onclick={copyCfGuide}><Copy size={13} /> Salin panduan</button>
+		</div>
+		<details>
+			<summary class="small" style="cursor:pointer;font-weight:700">Langkah pemasangan (klik untuk lihat)</summary>
+			<pre class="logbox" style="margin-top:8px">{cfGuide()}</pre>
+			<p class="muted small" style="margin:8px 0 0">
+				Ganti <span class="mono">chat.domainanda.com</span> dengan subdomain Anda.
+				Streaming chat & API aman lewat tunnel (heartbeat otomatis); hindari mode
+				non-streaming untuk jawaban &gt;100 dtk — itu batas platform Cloudflare.
+			</p>
+		</details>
+	{:else}
+		<button class="btn ghost sm" onclick={loadCf}>Periksa host</button>
 	{/if}
 </div>
 
