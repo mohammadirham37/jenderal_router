@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { ChartLine, Activity, Coins, AlertTriangle, Hash, Cpu, MemoryStick, HardDrive, Gauge } from '@lucide/svelte';
+	import { ChartLine, Activity, Coins, AlertTriangle, Hash, Cpu, MemoryStick, HardDrive, Gauge, KeyRound } from '@lucide/svelte';
 	import { api, fmtNum, fmtCost, truncate } from '$lib/api';
-	import { t, toast } from '$lib/stores.svelte';
+	import { app, t, toast, roleAtLeast } from '$lib/stores.svelte';
 	import Stat from '$lib/components/Stat.svelte';
 
 	type Summary = {
@@ -14,9 +14,31 @@
 	let logs = $state<any[]>([]);
 	let loading = $state(true);
 	let sys = $state<any>(null);
+	// dashboard member: statistik pribadi, bukan global
+	const isAdmin = $derived(!!app.me && roleAtLeast(app.me.role, 'admin'));
+	let mine = $state<any>(null);
+	let myLogs = $state<any[]>([]);
+	let myKeys = $state<any[]>([]);
 
 	$effect(() => {
 		(async () => {
+			if (!isAdmin) {
+				try {
+					const [u, l, k] = await Promise.all([
+						api.get('/api/me/usage'),
+						api.get('/api/me/logs?limit=20'),
+						api.get('/api/me/keys')
+					]);
+					mine = u;
+					myLogs = l.logs || [];
+					myKeys = k.keys || [];
+				} catch (e: any) {
+					toast(e.message, 'err');
+				} finally {
+					loading = false;
+				}
+				return;
+			}
 			try {
 				res = await api.get('/api/admin/analytics/summary?days=7');
 				const l = await api.get('/api/admin/logs?limit=8');
@@ -29,8 +51,9 @@
 		})();
 	});
 
-	// statistik sistem live (poll 3 dtk)
+	// statistik sistem live (poll 3 dtk) — khusus admin
 	$effect(() => {
+		if (!isAdmin) return;
 		const load = () => api.get('/api/admin/system/stats').then((s) => (sys = s)).catch(() => {});
 		load();
 		const id = setInterval(load, 3000);
@@ -39,6 +62,8 @@
 
 	const today = $derived(res?.per_day?.[res.per_day.length - 1] ?? {});
 	const maxReq = $derived(Math.max(1, ...(res?.per_day ?? []).map((d: any) => d.requests)));
+	const myToday = $derived(mine?.today ?? {});
+	const myActiveKeys = $derived(myKeys.filter((k) => !k.revoked_at).length);
 </script>
 
 <svelte:head><title>Ringkasan — JenderalRouter</title></svelte:head>
@@ -52,6 +77,59 @@
 
 {#if loading}
 	<div class="card"><span class="spinner dark"></span> {t('loading')}…</div>
+{:else if !isAdmin}
+	<!-- dashboard member: hanya aktivitas & pemakaian pribadi -->
+	<div class="grid cols-3">
+		<Stat icon={Activity} label={t('requests_today')} value={String(myToday.requests ?? 0)} />
+		<Stat icon={Hash} label={t('tokens_today')} value={fmtNum((myToday.tokens_in ?? 0) + (myToday.tokens_out ?? 0))} />
+		<Stat icon={KeyRound} label={t('keys')} value={String(myActiveKeys)} sub={t('usage_api')} />
+	</div>
+
+	<div class="card" style="margin-top:14px">
+		<h2><KeyRound size={15} /> {t('usage_api')}</h2>
+		<p class="muted small" style="margin:0 0 8px">
+			Base URL <span class="mono">{location.origin}/v1</span> — detail koneksi ada di halaman <a href="/usage">{t('usage_api')}</a>.
+		</p>
+		{#each myKeys as k (k.id)}
+			<div class="kv" style="border-bottom:1px solid var(--border);padding:6px 0">
+				<span class="mono small">{k.prefix}…</span>
+				<span class="small">{k.name}</span>
+				{#if k.revoked_at}<span class="badge err">revoked</span>
+				{:else}<span class="badge ok"><span class="dot"></span>active</span>{/if}
+			</div>
+		{:else}
+			<span class="muted small">Belum punya API key — minta admin membuatkan.</span>
+		{/each}
+		{#if mine?.quotas?.length}
+			<div class="kv small" style="margin-top:8px">
+				{#each mine.quotas as q (q.period)}
+					<span class="badge info">{q.period}: {q.used_tokens}/{q.token_limit || '∞'} token</span>
+				{/each}
+			</div>
+		{/if}
+	</div>
+
+	<div class="card" style="margin-top:14px">
+		<h2><Activity size={15} /> Aktivitas terbaru (7 hari)</h2>
+		<div class="table-wrap">
+			<table>
+				<thead><tr><th>Waktu</th><th>Model</th><th>Status</th><th>Latensi</th><th>Token</th></tr></thead>
+				<tbody>
+					{#each myLogs as l (l.id)}
+						<tr>
+							<td class="mono">{(l.ts || '').replace('T', ' ').slice(0, 19)}</td>
+							<td class="mono">{l.requested_model}</td>
+							<td><span class="badge {l.status >= 200 && l.status < 400 ? 'ok' : 'err'}">{l.status}</span></td>
+							<td>{l.latency_ms} ms</td>
+							<td>{l.tokens_in}/{l.tokens_out}</td>
+						</tr>
+					{:else}
+						<tr><td colspan="5" class="muted">Belum ada aktivitas</td></tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
+	</div>
 {:else if res}
 	<div class="grid cols-4">
 		<Stat icon={Activity} label={t('requests_today')} value={fmtNum(today.requests)} />

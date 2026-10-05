@@ -91,9 +91,9 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("PUT /api/admin/users/{id}/quota", a.requireSession(a.handlePutUserQuota, store.RoleAdmin, true))
 	a.mux.HandleFunc("PUT /api/admin/keys/{id}/quota", a.requireSession(a.handlePutKeyQuota, store.RoleAdmin, true))
 
-	a.mux.HandleFunc("GET /api/admin/logs", a.requireSession(a.handleListLogs, store.RoleViewer, false))
-	a.mux.HandleFunc("GET /api/admin/logs/export.csv", a.requireSession(a.handleExportLogs, store.RoleViewer, false))
-	a.mux.HandleFunc("GET /api/admin/analytics/summary", a.requireSession(a.handleAnalyticsSummary, store.RoleViewer, false))
+	a.mux.HandleFunc("GET /api/admin/logs", a.requireSession(a.handleListLogs, store.RoleAdmin, false))
+	a.mux.HandleFunc("GET /api/admin/logs/export.csv", a.requireSession(a.handleExportLogs, store.RoleAdmin, false))
+	a.mux.HandleFunc("GET /api/admin/analytics/summary", a.requireSession(a.handleAnalyticsSummary, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/audit", a.requireSession(a.handleListAudit, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/settings", a.requireSession(a.handleGetSettings, store.RoleAdmin, false))
 	a.mux.HandleFunc("PUT /api/admin/settings", a.requireSession(a.handlePutSettings, store.RoleSuperAdmin, true))
@@ -108,7 +108,7 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("GET /api/admin/system/update/status", a.requireSession(a.handleSystemUpdateStatus, store.RoleAdmin, false))
 	a.mux.HandleFunc("POST /api/admin/system/update", a.requireSession(a.handleSystemUpdate, store.RoleSuperAdmin, true))
 	a.mux.HandleFunc("POST /api/admin/system/update/apply", a.requireSession(a.handleSystemUpdateApply, store.RoleSuperAdmin, true))
-	a.mux.HandleFunc("GET /api/admin/system/stats", a.requireSession(a.handleSystemStats, store.RoleViewer, false))
+	a.mux.HandleFunc("GET /api/admin/system/stats", a.requireSession(a.handleSystemStats, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/system/cloudflare", a.requireSession(a.handleCloudflareStatus, store.RoleAdmin, false))
 	a.mux.HandleFunc("POST /api/admin/local/models/{name}/start", a.requireSession(a.handleLocalModelStart, store.RoleAdmin, true))
 	a.mux.HandleFunc("POST /api/admin/local/models/{name}/stop", a.requireSession(a.handleLocalModelStop, store.RoleAdmin, true))
@@ -129,6 +129,9 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("GET /api/me/models", a.requireSession(a.handleMeModels, store.RoleMember, false))
 	a.mux.HandleFunc("POST /api/me/chat", a.requireSession(a.handleMeChat, store.RoleMember, true))
 	a.mux.HandleFunc("GET /api/me/usage", a.requireSession(a.handleMeUsage, store.RoleMember, false))
+	a.mux.HandleFunc("GET /api/me/keys", a.requireSession(a.handleMeKeys, store.RoleMember, false))
+	a.mux.HandleFunc("GET /api/me/keys/{id}/reveal", a.requireSession(a.handleMeRevealKey, store.RoleMember, false))
+	a.mux.HandleFunc("GET /api/me/logs", a.requireSession(a.handleMeLogs, store.RoleMember, false))
 }
 
 // ---- sesi & middleware ----

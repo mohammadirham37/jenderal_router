@@ -4,7 +4,8 @@
 	import { goto } from '$app/navigation';
 	import {
 		Satellite, LayoutDashboard, MessageSquare, Cable, BrainCircuit, Link2, Users,
-		ScrollText, ChartLine, Server, Settings, LogOut, Menu, X, PanelLeftClose, PanelLeftOpen
+		ScrollText, ChartLine, Server, Settings, LogOut, Menu, X, PanelLeftClose,
+		PanelLeftOpen, Gauge
 	} from '@lucide/svelte';
 	import { browser } from '$app/environment';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
@@ -13,16 +14,22 @@
 	import { app, t, toast, roleAtLeast } from '$lib/stores.svelte';
 	import Toasts from '$lib/components/Toasts.svelte';
 
-	const NAV = [
+	type NavItem = {
+		route: string; icon: any; label: string; min: string; section: string; max?: string;
+	};
+
+	const NAV: NavItem[] = [
 		{ route: '/dashboard', icon: LayoutDashboard, label: 'dashboard', min: 'viewer', section: 'main' },
 		{ route: '/chat', icon: MessageSquare, label: 'chat', min: 'member', section: 'main' },
-		{ route: '/providers', icon: Cable, label: 'providers', min: 'viewer', section: 'gateway' },
-		{ route: '/models', icon: BrainCircuit, label: 'models', min: 'viewer', section: 'gateway' },
-		{ route: '/combos', icon: Link2, label: 'combos', min: 'viewer', section: 'gateway' },
+		// halaman Penggunaan API: untuk member saja (admin punya Log/Analitik lengkap)
+		{ route: '/usage', icon: Gauge, label: 'usage_api', min: 'member', max: 'admin', section: 'main' },
+		{ route: '/providers', icon: Cable, label: 'providers', min: 'admin', section: 'gateway' },
+		{ route: '/models', icon: BrainCircuit, label: 'models', min: 'admin', section: 'gateway' },
+		{ route: '/combos', icon: Link2, label: 'combos', min: 'admin', section: 'gateway' },
 		{ route: '/users', icon: Users, label: 'users', min: 'admin', section: 'kelola' },
-		{ route: '/logs', icon: ScrollText, label: 'logs', min: 'viewer', section: 'observabilitas' },
-		{ route: '/analytics', icon: ChartLine, label: 'analytics', min: 'viewer', section: 'observabilitas' },
-		{ route: '/local', icon: Server, label: 'local', min: 'viewer', section: 'sistem' },
+		{ route: '/logs', icon: ScrollText, label: 'logs', min: 'admin', section: 'observabilitas' },
+		{ route: '/analytics', icon: ChartLine, label: 'analytics', min: 'admin', section: 'observabilitas' },
+		{ route: '/local', icon: Server, label: 'local', min: 'admin', section: 'sistem' },
 		{ route: '/settings', icon: Settings, label: 'settings', min: 'admin', section: 'sistem' }
 	];
 	const sections: Record<string, string> = {
@@ -99,7 +106,7 @@
 			</div>
 			<nav class="nav">
 				{#each NAV as item, i}
-					{#if roleAtLeast(app.me.role, item.min)}
+					{#if roleAtLeast(app.me.role, item.min) && (!item.max || !roleAtLeast(app.me.role, item.max))}
 						{#if item.section !== 'main' && (i === 0 || NAV[i - 1].section !== item.section)}
 							<div class="nav-section">{sections[item.section]}</div>
 						{/if}
