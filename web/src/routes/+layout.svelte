@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation';
 	import {
 		Satellite, LayoutDashboard, MessageSquare, Cable, BrainCircuit, Link2, Users,
-		ScrollText, ChartLine, Server, Settings, LogOut
+		ScrollText, ChartLine, Server, Settings, LogOut, Menu, X
 	} from '@lucide/svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import LangToggle from '$lib/components/LangToggle.svelte';
@@ -33,6 +33,8 @@
 	};
 
 	let { children } = $props();
+
+	let menuOpen = $state(false);
 
 	setUnauthorizedHandler(() => {
 		resetCSRF();
@@ -73,7 +75,10 @@
 	{@render children()}
 {:else if app.me}
 	<div class="shell">
-		<aside class="sidebar">
+		{#if menuOpen}
+			<div class="backdrop" onclick={() => (menuOpen = false)} aria-hidden="true"></div>
+		{/if}
+		<aside class="sidebar" class:open={menuOpen}>
 			<div class="brand">
 				<span class="logo"><Satellite size={19} /></span>
 				<span>JenderalRouter</span>
@@ -84,7 +89,11 @@
 						{#if item.section !== 'main' && (i === 0 || NAV[i - 1].section !== item.section)}
 							<div class="nav-section">{sections[item.section]}</div>
 						{/if}
-						<a href={item.route} class={page.url.pathname === item.route ? 'active' : ''}>
+						<a
+							href={item.route}
+							class:active={page.url.pathname === item.route}
+							onclick={() => (menuOpen = false)}
+						>
 							<item.icon size={17} />
 							{t(item.label)}
 						</a>
@@ -107,6 +116,15 @@
 			</div>
 		</aside>
 		<main class="main">
+			<header class="topbar">
+				<button class="icon-btn burger" aria-label="Menu" onclick={() => (menuOpen = !menuOpen)}>
+					{#if menuOpen}<X size={20} />{:else}<Menu size={20} />{/if}
+				</button>
+				<span class="brand-mini">
+					<span class="logo"><Satellite size={15} /></span>
+					JenderalRouter
+				</span>
+			</header>
 			{@render children()}
 		</main>
 	</div>

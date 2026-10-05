@@ -144,36 +144,54 @@ h1.page-title :global(svg) { color: var(--accent); }
 
 @media (max-width: 900px) {
 	.shell { flex-direction: column; }
-	/* sidebar jadi top bar sticky: brand + nav pil geser horizontal */
+
+	/* top bar ringkas: hamburger + brand */
+	.topbar { display: none; }
+	.backdrop { display: none; }
+
+	/* sidebar = drawer geser dari kiri */
 	.sidebar {
-		position: sticky; top: 0; z-index: 60;
-		width: 100%; flex: none; height: auto;
-		padding: 10px 12px 8px;
-		border-right: none; border-bottom: 1px solid var(--border);
+		position: fixed; top: 0; bottom: 0; left: 0;
+		width: min(280px, 84vw); flex: none;
+		height: 100dvh;
+		transform: translateX(-105%);
+		transition: transform 0.25s cubic-bezier(0.2, 0.7, 0.3, 1), visibility 0s 0.25s;
+		visibility: hidden;
+		z-index: 70;
+		padding: 16px 12px 12px;
+		background: var(--surface);
+		border-right: 1px solid var(--border);
+		box-shadow: 0 12px 48px rgb(0 0 0 / 0.4);
+	}
+	.sidebar.open {
+		transform: none;
+		visibility: visible;
+		transition: transform 0.25s cubic-bezier(0.2, 0.7, 0.3, 1);
+	}
+	.nav { padding-right: 0; }
+	.main { padding: 0 14px 32px; }
+	.topbar {
+		display: flex; align-items: center; gap: 10px;
+		margin: 0 -14px 14px; padding: 10px 14px;
+		position: sticky; top: 0; z-index: 55;
 		background: color-mix(in srgb, var(--surface) 92%, transparent);
 		backdrop-filter: blur(14px);
+		border-bottom: 1px solid var(--border);
 	}
-	.brand { padding: 0 4px 8px; }
-	.nav {
-		flex-direction: row; overflow-x: auto; gap: 6px;
-		padding-bottom: 4px; scrollbar-width: none;
+	.topbar .burger { width: 38px; height: 38px; }
+	.brand-mini {
+		display: inline-flex; align-items: center; gap: 8px;
+		font-weight: 800; font-size: 15px; letter-spacing: -0.01em;
 	}
-	.nav::-webkit-scrollbar { display: none; }
-	.nav a {
-		white-space: nowrap; padding: 7px 12px; border-radius: 999px;
-		border: 1px solid var(--border); background: var(--surface);
-		font-size: 13px;
+	.brand-mini .logo {
+		width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
+		background: var(--grad-accent); color: #fff; box-shadow: 0 3px 12px rgb(79 124 255 / 0.4);
 	}
-	.nav a.active { border-color: transparent; }
-	.nav a.active::before { display: none; }
-	.nav-section { display: none; }
-	.sidebar-foot {
-		border-top: none; padding-top: 8px;
-		flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px;
-	}
-	.user-chip { flex: 1; min-width: 0; }
-	.main { padding: 14px 14px 32px; }
 	h1.page-title { font-size: 18px; }
+}
+
+@media (min-width: 901px) {
+	.backdrop { display: none; }
 }
 
 /* ---- komponen ---- */
