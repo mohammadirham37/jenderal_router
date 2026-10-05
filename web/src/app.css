@@ -205,6 +205,7 @@ h1.page-title :global(svg) { color: var(--accent); }
 }
 .card:hover { border-color: var(--border-strong); }
 .card + .card { margin-top: 14px; }
+.grid > .card { margin-top: 0; } /* jarak grid diatur gap — cegah bocor .card + .card */
 .card h2 { font-size: 14px; margin: 0 0 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 .card h2 :global(svg) { color: var(--accent); }
 
