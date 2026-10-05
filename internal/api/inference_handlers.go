@@ -54,7 +54,8 @@ func (a *App) infer(w http.ResponseWriter, r *http.Request, inbound translate.Fo
 		return
 	}
 	// model/combo harus diizinkan key (FR-4.3) → 403 model_not_allowed
-	if !ac.ModelAllowed(internal.Model) {
+	// (nama request dicocokkan juga dengan alias ↔ public_id-nya)
+	if !modelAllowedForRequest(ac, a.st, internal.Model) {
 		a.writeGateError(w, inbound, apigate.ErrModelNotAllowed(internal.Model))
 		return
 	}
@@ -132,15 +133,15 @@ func (a *App) infer(w http.ResponseWriter, r *http.Request, inbound translate.Fo
 		return
 	}
 
-	// header rute aktual (FR-2.6)
+	// header rute aktual (FR-2.6) — nama tampilan (alias) yang dikonsumsi klien
 	w.Header().Set("X-Route-Provider", res.ProviderName)
-	w.Header().Set("X-Route-Model", res.ModelPublic)
+	w.Header().Set("X-Route-Model", res.ModelDisplay)
 	w.Header().Set("X-Route-Attempts", fmt.Sprintf("%d", rec.Attempts))
 
 	rec.ProviderID = res.ProviderID
 	rec.ProviderName = res.ProviderName
 	rec.ModelID = steps[res.StepIndex].ModelID
-	rec.ModelName = res.ModelPublic
+	rec.ModelName = res.ModelDisplay
 
 	if internal.Stream {
 		// FR-2.3: fallback sudah selesai di runner; mulai sekarang error diteruskan
@@ -149,6 +150,7 @@ func (a *App) infer(w http.ResponseWriter, r *http.Request, inbound translate.Fo
 	}
 
 	resp := res.Response
+	resp.Model = res.ModelDisplay // echo nama tampilan (alias), bukan nama upstream
 	tokensIn, tokensOut := resp.Usage.PromptTokens, resp.Usage.CompletionTokens
 	if tokensIn == 0 && tokensOut == 0 {
 		tokensIn, tokensOut = reqTokens, translate.EstimateTokens(resp.Content)
@@ -204,7 +206,7 @@ func (a *App) streamToClient(w http.ResponseWriter, inbound translate.Format, re
 
 func (a *App) streamOpenAIOut(w http.ResponseWriter, flusher http.Flusher, res *router.AttemptResult, rec *usage.Entry, reqTokens int) {
 	id := genChunkID()
-	model := res.ModelPublic
+	model := res.ModelDisplay // echo nama tampilan (alias)
 	var content strings.Builder
 	first := true
 	tokensIn, tokensOut := 0, 0
@@ -308,9 +310,9 @@ func (a *App) streamAnthropicOut(w http.ResponseWriter, flusher http.Flusher, re
 		}
 		switch e.Type {
 		case translate.EventMessageBegin:
-			begin(e.ID, orStr(e.Model, res.ModelPublic))
+			begin(e.ID, res.ModelDisplay) // alias menang atas nama upstream
 		case translate.EventDelta:
-			begin("", res.ModelPublic)
+			begin("", res.ModelDisplay)
 			if e.Delta.Text != "" {
 				content.WriteString(e.Delta.Text)
 			}
@@ -321,7 +323,7 @@ func (a *App) streamAnthropicOut(w http.ResponseWriter, flusher http.Flusher, re
 			}
 			writeFrames(writer.WriteEvent(e))
 		case translate.EventMessageEnd:
-			begin("", res.ModelPublic)
+			begin("", res.ModelDisplay)
 			writeFrames(writer.WriteEvent(e))
 		case translate.EventError:
 			// FR-2.3: error di tengah stream diteruskan sebagai event error
@@ -332,7 +334,7 @@ func (a *App) streamAnthropicOut(w http.ResponseWriter, flusher http.Flusher, re
 		}
 	}
 	if first {
-		begin("", res.ModelPublic)
+		begin("", res.ModelDisplay)
 	}
 	fmt.Fprint(w, writer.Finish())
 	if flusher != nil {

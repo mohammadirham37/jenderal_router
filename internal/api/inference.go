@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jenderal/jenderalrouter/internal/apigate"
 	"github.com/jenderal/jenderalrouter/internal/provider"
 	"github.com/jenderal/jenderalrouter/internal/router"
 	"github.com/jenderal/jenderalrouter/internal/store"
@@ -57,10 +58,33 @@ func modelToStep(m *store.Model, timeoutMs int) router.Step {
 		ModelID:    m.ID,
 		ProviderID: m.ProviderID,
 		PublicID:   m.PublicID,
+		Alias:      m.Alias,
 		Upstream:   m.UpstreamName,
 		Format:     formatForProvider(m.ProviderType),
 		TimeoutMs:  timeoutMs,
 	}
+}
+
+// modelDisplayID nama model untuk klien: alias bila ada, else public_id.
+func modelDisplayID(m *store.Model) string {
+	if m.Alias != "" {
+		return m.Alias
+	}
+	return m.PublicID
+}
+
+// modelAllowedForRequest memeriksa allowlist key terhadap nama request DAN
+// padanannya (alias ↔ public_id) agar kunci yang meng-whitelist salah satu
+// tetap bisa memakai bentuk lainnya.
+func modelAllowedForRequest(ac *apigate.AuthContext, st *store.Store, name string) bool {
+	if ac.ModelAllowed(name) {
+		return true
+	}
+	m, err := st.FindModelByPublicOrAlias(name)
+	if err != nil {
+		return false
+	}
+	return ac.ModelAllowed(m.PublicID) || ac.ModelAllowed(m.Alias)
 }
 
 func formatForProvider(ptype string) translate.Format {
@@ -196,7 +220,8 @@ func (sr *stepRun) do(ctx context.Context, internal *translate.ChatRequest) (*ro
 		}
 		return &router.AttemptResult{
 			ProviderID: sr.prov.ID, ProviderName: sr.prov.Name,
-			ModelPublic: sr.step.PublicID, CredentialID: sr.cred.ID, Stream: es,
+			ModelPublic: sr.step.PublicID, ModelDisplay: sr.step.Display(),
+			CredentialID: sr.cred.ID, Stream: es,
 		}, nil
 	}
 	resp, err := sr.app.client.Complete(ctx, ureq)
@@ -213,7 +238,8 @@ func (sr *stepRun) do(ctx context.Context, internal *translate.ChatRequest) (*ro
 	sr.app.st.MarkCredentialSuccess(sr.cred.ID)
 	return &router.AttemptResult{
 		ProviderID: sr.prov.ID, ProviderName: sr.prov.Name,
-		ModelPublic: sr.step.PublicID, CredentialID: sr.cred.ID, Response: resp,
+		ModelPublic: sr.step.PublicID, ModelDisplay: sr.step.Display(),
+		CredentialID: sr.cred.ID, Response: resp,
 	}, nil
 }
 

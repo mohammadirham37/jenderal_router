@@ -34,10 +34,11 @@ func (a *App) modelsInference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, m := range models {
-		if !ac.ModelAllowed(m.PublicID) {
+		// allowlist key menerima public_id maupun alias
+		if !ac.ModelAllowed(m.PublicID) && (m.Alias == "" || !ac.ModelAllowed(m.Alias)) {
 			continue
 		}
-		data = append(data, modelEntry{ID: m.PublicID, Object: "model", Created: now, OwnedBy: m.ProviderName})
+		data = append(data, modelEntry{ID: modelDisplayID(m), Object: "model", Created: now, OwnedBy: m.ProviderName})
 	}
 	if combos, err := a.st.ListCombos(); err == nil {
 		for _, c := range combos {

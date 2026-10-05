@@ -18,9 +18,18 @@ type Step struct {
 	ModelID    int64
 	ProviderID int64
 	PublicID   string // untuk header X-Route-Model
+	Alias      string // nama tampilan/model API; kosong = pakai PublicID
 	Upstream   string // nama model upstream
 	Format     translate.Format
 	TimeoutMs  int
+}
+
+// Display nama model yang ditampilkan ke klien: alias bila diisi, else public_id.
+func (s Step) Display() string {
+	if s.Alias != "" {
+		return s.Alias
+	}
+	return s.PublicID
 }
 
 // Resolver mengubah nama (alias / public_id / nama combo) menjadi langkah.
@@ -155,6 +164,7 @@ type AttemptResult struct {
 	ProviderID   int64
 	ProviderName string
 	ModelPublic  string
+	ModelDisplay string // alias tampilan (fallback ModelPublic)
 	CredentialID int64
 	Stream       StreamHandle
 	Response     *translate.ChatResponse

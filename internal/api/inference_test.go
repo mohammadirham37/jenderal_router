@@ -413,6 +413,62 @@ func TestModelsEndpointE2E(t *testing.T) {
 	}
 }
 
+// TestAliasModelE2E: alias tampil di /v1/models, dipakai klien untuk request,
+// dan allowlist key yang menyimpan public_id tetap menerima alias-nya.
+func TestAliasModelE2E(t *testing.T) {
+	app, st, key := appTestEnv(t)
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"id":"cmpl-1","model":"mock-model","choices":[{"index":0,"message":{"role":"assistant","content":"Halo dari mock"},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":4}}`)
+	}))
+	defer mock.Close()
+	seedMockProvider(t, st, "Mock", "mk", mock.URL)
+	models, err := st.ListEnabledModels()
+	if err != nil || len(models) == 0 {
+		t.Fatalf("list model: %v", err)
+	}
+	alias := "cepat"
+	if err := st.UpdateModelFields(models[0].ID, &alias, nil, nil, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// /v1/models menampilkan alias
+	w := doJSON(t, app.Handler(), "GET", "/v1/models", key, nil)
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var list map[string]any
+	json.Unmarshal(w.Body.Bytes(), &list)
+	id := list["data"].([]any)[0].(map[string]any)["id"]
+	if id != "cepat" {
+		t.Errorf("model id = %v (harus alias)", id)
+	}
+
+	// request pakai alias → 200, respons meng-echo alias
+	w = doJSON(t, app.Handler(), "POST", "/v1/chat/completions", key, inferBody("cepat", false))
+	if w.Code != 200 {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["model"] != "cepat" {
+		t.Errorf("resp model = %v (harus alias)", resp["model"])
+	}
+	if w.Header().Get("X-Route-Model") != "cepat" {
+		t.Errorf("X-Route-Model = %s (harus alias)", w.Header().Get("X-Route-Model"))
+	}
+
+	// allowlist key berisi public_id → request via alias tetap diizinkan
+	user, _ := st.GetUserByEmail("dev@test")
+	plain, hash, _ := crypto.NewAPIKey()
+	if _, err := st.CreateAPIKey(user.ID, "whitelist", plain, hash, "", "mk/mock-model", "", 0, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	w = doJSON(t, app.Handler(), "POST", "/v1/chat/completions", plain, inferBody("cepat", false))
+	if w.Code != 200 {
+		t.Fatalf("allowlist public_id menolak alias: status = %d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestUsageMeE2E(t *testing.T) {
 	app, st, key := appTestEnv(t)
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))

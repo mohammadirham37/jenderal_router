@@ -32,7 +32,7 @@ func (a *App) handleMeModels(w http.ResponseWriter, r *http.Request) {
 	}
 	entries := []entry{}
 	for _, m := range models {
-		entries = append(entries, entry{ID: m.PublicID, Kind: "model", Owner: m.ProviderName, Local: m.ProviderType == "llamastash"})
+		entries = append(entries, entry{ID: modelDisplayID(m), Kind: "model", Owner: m.ProviderName, Local: m.ProviderType == "llamastash"})
 	}
 	if combos, err := a.st.ListCombos(); err == nil {
 		for _, c := range combos {
@@ -192,17 +192,21 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	display := res.ModelDisplay
+	if display == "" {
+		display = res.ModelPublic
+	}
 	rec.ProviderID = res.ProviderID
 	rec.ProviderName = res.ProviderName
 	rec.ModelID = steps[res.StepIndex].ModelID
-	rec.ModelName = res.ModelPublic
+	rec.ModelName = display
 	w.Header().Set("X-Route-Provider", res.ProviderName)
-	w.Header().Set("X-Route-Model", res.ModelPublic)
+	w.Header().Set("X-Route-Model", display)
 
 	id := genChunkID()
 	var content strings.Builder
 	var reasoning strings.Builder
-	servedModel := ""
+	servedModel := display // nama tampilan (alias) untuk metadata UI chat
 	tokensIn, tokensOut := 0, 0
 	if internal.Stream {
 		first := true
@@ -211,19 +215,16 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				break
 			}
-			if e.Model != "" {
-				servedModel = e.Model
-			}
 			switch e.Type {
 			case translate.EventDelta:
 				wmu.Lock()
 				if first {
-					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, map[string]any{"role": "assistant", "content": ""}))
+					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, display, map[string]any{"role": "assistant", "content": ""}))
 					first = false
 				}
 				if e.Delta.Reasoning != "" {
 					reasoning.WriteString(e.Delta.Reasoning)
-					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, map[string]any{"reasoning_content": e.Delta.Reasoning}))
+					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, display, map[string]any{"reasoning_content": e.Delta.Reasoning}))
 				}
 				if len(e.Delta.ToolCalls) > 0 {
 					tcs := make([]map[string]any, 0, len(e.Delta.ToolCalls))
@@ -237,17 +238,17 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 						}
 						tcs = append(tcs, tcj)
 					}
-					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, map[string]any{"tool_calls": tcs}))
+					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, display, map[string]any{"tool_calls": tcs}))
 				}
 				if e.Delta.Text != "" {
 					content.WriteString(e.Delta.Text)
-					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, map[string]any{"content": e.Delta.Text}))
+					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, display, map[string]any{"content": e.Delta.Text}))
 				}
 				wmu.Unlock()
 			case translate.EventMessageEnd:
 				if e.Delta != nil && e.Delta.FinishReason != "" {
 					wmu.Lock()
-					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, map[string]any{"finish_reason": e.Delta.FinishReason}))
+					fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, display, map[string]any{"finish_reason": e.Delta.FinishReason}))
 					wmu.Unlock()
 				}
 			case translate.EventUsage:
@@ -301,7 +302,7 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 			chunk["served_model"] = servedModel
 		}
 		wmu.Lock()
-		fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, res.ModelPublic, chunk))
+		fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, display, chunk))
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		if flusher != nil {
 			flusher.Flush()
