@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { Plus, Send, Trash2, X, Bot, Sparkles, History, Globe, Activity, Gauge } from '@lucide/svelte';
+	import { Plus, Send, Trash2, X, Bot, Sparkles, History, Globe, Activity, Gauge, Download, FileText, File, Presentation, Sheet } from '@lucide/svelte';
 	import { api, md, fmtTs, fmtNum } from '$lib/api';
+	import { exportAnswer, type ExportFormat } from '$lib/exporters';
 	import { t, toast } from '$lib/stores.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 
@@ -125,6 +126,28 @@
 
 	function scrollBottom() {
 		setTimeout(() => msgsEl?.scrollTo({ top: msgsEl.scrollHeight }), 30);
+	}
+
+	// ---- ekspor jawaban ke file (md/docx/pptx/xlsx/csv) ----
+	const EXPORTS: { fmt: ExportFormat; label: string; hint: string }[] = [
+		{ fmt: 'md', label: 'MD', hint: 'Unduh sebagai Markdown' },
+		{ fmt: 'docx', label: 'DOCX', hint: 'Unduh sebagai dokumen Word' },
+		{ fmt: 'pptx', label: 'PPTX', hint: 'Unduh sebagai presentasi PowerPoint' },
+		{ fmt: 'xlsx', label: 'XLSX', hint: 'Unduh sebagai workbook Excel' },
+		{ fmt: 'csv', label: 'CSV', hint: 'Unduh tabel jawaban sebagai CSV' }
+	];
+	function convTitle(): string {
+		const c = conversations.find((x) => x.id === current);
+		if (c?.title) return c.title;
+		const first = msgs.find((m) => m.role === 'user')?.content;
+		return first ? first.slice(0, 60) : 'Jawaban';
+	}
+	function doExport(m: Msg, fmt: ExportFormat) {
+		try {
+			exportAnswer(convTitle(), m.content, fmt);
+		} catch (e: any) {
+			toast('ekspor gagal: ' + e.message, 'err');
+		}
 	}
 
 	async function send() {
@@ -340,13 +363,21 @@
 					{/if}
 					<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 					{@html md(m.content)}
-					{#if m.role === 'assistant' && (m.provider || m.model || m.ms)}
-						<div class="meta">
-							{#if m.model}<span title="model yang melayani jawaban ini"><Bot size={11} /> {m.model}</span>{/if}
-							{#if m.ms}<span title="durasi streaming jawaban"><span class="dot"></span> {m.ms.toLocaleString('id-ID')} dtk</span>{/if}
-							{#if m.provider}<span><Sparkles size={11} /> {t('answered_by')}: {m.provider}</span>{/if}
-						</div>
-					{/if}
+						{#if m.role === 'assistant' && (m.provider || m.model || m.ms)}
+							<div class="meta">
+								{#if m.model}<span title="model yang melayani jawaban ini"><Bot size={11} /> {m.model}</span>{/if}
+								{#if m.ms}<span title="durasi streaming jawaban"><span class="dot"></span> {m.ms.toLocaleString('id-ID')} dtk</span>{/if}
+								{#if m.provider}<span><Sparkles size={11} /> {t('answered_by')}: {m.provider}</span>{/if}
+							</div>
+						{/if}
+						{#if m.role === 'assistant' && m.content && (!sending || i < msgs.length - 1)}
+							<div class="export-row">
+								<Download size={11} />
+								{#each EXPORTS as ex (ex.fmt)}
+									<button title={ex.hint} onclick={() => doExport(m, ex.fmt)}>{ex.label}</button>
+								{/each}
+							</div>
+						{/if}
 				</div>
 			{/each}
 		</div>
@@ -404,6 +435,20 @@
 	.model-select { max-width: 340px; min-width: 200px; }
 	.tool-badge { cursor: help; }
 	.quota-chip { cursor: help; white-space: nowrap; }
+	.export-row {
+		display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+		margin: 6px 0 2px; color: var(--muted);
+	}
+	.export-row button {
+		all: unset; cursor: pointer; padding: 1px 8px;
+		border: 1px solid var(--border); border-radius: 999px;
+		font-size: 10px; font-weight: 700; color: var(--muted);
+		transition: color var(--speed), border-color var(--speed), background var(--speed);
+	}
+	.export-row button:hover {
+		color: var(--accent-2); border-color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 10%, transparent);
+	}
 	.chat-pane {
 		flex: 1;
 		display: flex;
