@@ -179,16 +179,16 @@
 		return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
 	}
 	function firstH1(s: string): string {
-		const m = s.match(/^#\s+(.+)/m);
-		return m ? m[1].trim() : '';
+		const m = s.match(/^#{1,3}\s+(.+)/m);
+		return m ? m[1].replace(/^#+\s+/, '').trim() : '';
 	}
 	function attachGeneratedFile(type: DocType) {
 		const bubble = [...msgs].reverse().find((m) => m.role === 'assistant' && m.content.trim());
 		if (!bubble) return;
 		try {
 			const title = firstH1(bubble.content) || convTitle();
-			// judul H1 sudah menjadi nama/judul file — buang dari konten agar tak dobel
-			const content = bubble.content.replace(/^\s*#\s+[^\n]*\n+/, '');
+			// judul heading pertama sudah menjadi nama/judul file — buang dari konten agar tak dobel
+			const content = bubble.content.replace(/^\s*#{1,3}\s+[^\n]*\n+/, '');
 			const blob = buildDocBlob(type, title, content);
 			bubble.file = {
 				name: docFileName(title, type),

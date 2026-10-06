@@ -133,7 +133,8 @@ export function parseMarkdown(src: string): Block[] {
 		}
 		const h = line.match(/^(#{1,6})\s+(.*)/);
 		if (h) {
-			blocks.push({ kind: 'heading', level: h[1].length, text: h[2].trim() });
+			// model kadang menulis "## # Judul" — buang pagar ekstra
+			blocks.push({ kind: 'heading', level: h[1].length, text: h[2].replace(/^#+\s+/, '').trim() });
 			i++;
 			continue;
 		}
