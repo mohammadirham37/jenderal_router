@@ -603,6 +603,51 @@ export function exportConversation(title: string, turns: ChatTurn[], fmt: Export
 	download(`${fileBase(title)}.${fmt}`, blob);
 }
 
+// ---- mode dokumen: prompt user → file jadi (ala "skill doc") ----
+
+export type DocType = 'pptx' | 'docx' | 'xlsx' | 'csv';
+
+// instruksi per format yang disisipkan sebagai system message agar model
+// menyusun konten yang bisa dikonversi rapi menjadi file
+export const DOC_SYSTEM: Record<DocType, string> = {
+	pptx:
+		'Pengguna meminta file presentasi. Susun SELURUH jawabanmu sebagai slide dengan aturan ketat: baris pertama "# <Judul Presentasi>", lalu setiap slide diawali heading "## <Judul Slide>" dan diisi 3-6 poin bullet "- ". Tanpa paragraf panjang, tanpa kalimat pembuka/penutup, tanpa teks di luar struktur slide.',
+	docx:
+		'Pengguna meminta file dokumen. Susun jawaban sebagai dokumen terstruktur: baris pertama "# <Judul Dokumen>", bagian dengan "## <Judul Bagian>", paragraf ringkas, poin penting sebagai bullet "- ", dan tabel markdown bila relevan. Jangan tulis catatan di luar isi dokumen.',
+	xlsx:
+		'Pengguna meminta file Excel. Sajikan data sebagai satu atau beberapa tabel markdown dengan baris header "| Kol1 | Kol2 |" dan pemisah "|---|---|". Beri heading "## <Nama Tabel>" di atas setiap tabel. Isi sel berupa nilai murni (angka tanpa titik ribuan). Tanpa narasi panjang.',
+	csv:
+		'Pengguna meminta file CSV. Sajikan TEPAT SATU tabel markdown dengan baris header dan pemisah "|---|". Isi sel berupa nilai murni tanpa karakter pipe. Tanpa narasi panjang.'
+};
+
+const DOC_PATTERNS: [RegExp, DocType][] = [
+	[/\b(pptx?|presentasi\w*|slide\w*)\b/i, 'pptx'],
+	[/\b(docx?|dokumen\w*|word)\b/i, 'docx'],
+	[/\b(xlsx?|excel)\b/i, 'xlsx'],
+	[/\bcsv\b/i, 'csv']
+];
+
+// Deteksi permintaan pembuatan file dari prompt user (harus ada kata kerja
+// buat + nama format, agar pertanyaan biasa seperti "apa itu ppt" tidak kena).
+export function detectDocRequest(text: string): DocType | null {
+	if (!/buat|bikin|susun|siapkan|generate|create/i.test(text)) return null;
+	for (const [re, type] of DOC_PATTERNS) if (re.test(text)) return type;
+	return null;
+}
+
+// Rakit blob file dari konten markdown sesuai tipe dokumen.
+export function buildDocBlob(type: DocType, title: string, content: string): Blob {
+	if (type === 'pptx') return buildPptx(title, content);
+	if (type === 'docx') return buildDocx(title, content);
+	if (type === 'xlsx') return buildXlsx(title, content);
+	return buildCsv(title, content);
+}
+
+// nama file attachment dari judul (dipakai kartu unduh di chat)
+export function docFileName(title: string, ext: string): string {
+	return `${slugify(title)}.${ext}`;
+}
+
 // ---- unduhan ----
 
 export type ExportFormat = 'md' | 'docx' | 'pptx' | 'xlsx' | 'csv';

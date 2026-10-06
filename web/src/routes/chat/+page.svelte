@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { Plus, Send, Trash2, X, Bot, Sparkles, History, Globe, Activity, Gauge, Download, FileText, File, Presentation, Sheet } from '@lucide/svelte';
+	import { Plus, Send, Trash2, X, Bot, Sparkles, History, Globe, Activity, Gauge, Download, FileText, File, Presentation, Sheet, Table } from '@lucide/svelte';
 	import { api, md, fmtTs, fmtNum } from '$lib/api';
-	import { exportAnswer, exportConversation, type ExportFormat } from '$lib/exporters';
+	import { exportAnswer, exportConversation, detectDocRequest, DOC_SYSTEM, buildDocBlob, docFileName, type ExportFormat, type DocType } from '$lib/exporters';
 	import { t, toast } from '$lib/stores.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 
@@ -9,6 +9,7 @@
 		role: 'user' | 'assistant' | 'tool'; content: string; provider?: string;
 		reasoning?: string; model?: string; ms?: number;
 		tools?: { name: string; args: string; url?: string }[];
+		file?: { name: string; url: string; size: number; type: DocType };
 	};
 	type ToolCall = { id: string; name: string; args: string };
 
@@ -172,11 +173,43 @@
 		showExport = false;
 	}
 
+	// ---- file jadi: prompt user → dokumen terlampir di jawaban ----
+	const FILE_ICONS = { pptx: Presentation, docx: FileText, xlsx: Sheet, csv: Table };
+	function fmtSize(n: number): string {
+		return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+	}
+	function firstH1(s: string): string {
+		const m = s.match(/^#\s+(.+)/m);
+		return m ? m[1].trim() : '';
+	}
+	function attachGeneratedFile(type: DocType) {
+		const bubble = [...msgs].reverse().find((m) => m.role === 'assistant' && m.content.trim());
+		if (!bubble) return;
+		try {
+			const title = firstH1(bubble.content) || convTitle();
+			// judul H1 sudah menjadi nama/judul file — buang dari konten agar tak dobel
+			const content = bubble.content.replace(/^\s*#\s+[^\n]*\n+/, '');
+			const blob = buildDocBlob(type, title, content);
+			bubble.file = {
+				name: docFileName(title, type),
+				url: URL.createObjectURL(blob),
+				size: blob.size,
+				type
+			};
+			msgs = [...msgs];
+			scrollBottom();
+		} catch (e: any) {
+			toast('gagal merakit file: ' + e.message, 'err');
+		}
+	}
+
 	async function send() {
 		const text = input.trim();
 		if (!text || sending) return;
 		sending = true;
 		input = '';
+		// permintaan file (ppt/docx/xlsx/csv)? → instruksi struktur + file otomatis
+		const docType = detectDocRequest(text);
 		// percakapan baru bila belum ada yang terpilih — wajib sebelum push pesan
 		if (!current) {
 			try {
@@ -192,6 +225,7 @@
 
 		// riwayat awal: semua pesan yang sudah ada (tanpa bubble kosong)
 		const history: any[] = [];
+		if (docType) history.push({ role: 'system', content: DOC_SYSTEM[docType] });
 		for (const m of msgs) {
 			if (m.role === 'user') history.push({ role: 'user', content: m.content });
 			else if (m.role === 'assistant' && m.content) history.push({ role: 'assistant', content: m.content });
@@ -294,6 +328,7 @@
 			await api.post(`/api/me/conversations/${current}/messages`, {
 				role: 'assistant', content: lastAssistant?.content || '', model: lastAssistant?.model || model
 			});
+			if (docType) attachGeneratedFile(docType);
 			loadQuota();
 			loadConversations();
 		} catch (e: any) {
@@ -405,6 +440,16 @@
 					{/if}
 					<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 					{@html md(m.content)}
+					{#if m.file}
+						<a class="file-card" href={m.file.url} download={m.file.name}>
+							<svelte:component this={FILE_ICONS[m.file.type]} size={18} />
+							<span class="grow">
+								<b>{m.file.name}</b>
+								<small>{fmtSize(m.file.size)} — {t('file_ready')}</small>
+							</span>
+							<span class="dl"><Download size={15} /></span>
+						</a>
+					{/if}
 						{#if m.role === 'assistant' && (m.provider || m.model || m.ms)}
 							<div class="meta">
 								{#if m.model}<span title="model yang melayani jawaban ini"><Bot size={11} /> {m.model}</span>{/if}
@@ -508,6 +553,19 @@
 	.export-menu b { font-size: 11px; color: var(--accent-2); min-width: 36px; }
 	.export-menu span { color: var(--muted); }
 	.menu-backdrop { position: fixed; inset: 0; z-index: 39; background: transparent; }
+	.file-card {
+		display: flex; align-items: center; gap: 10px;
+		margin: 8px 0 4px; padding: 10px 12px;
+		border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+		background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+		border-radius: 12px; color: var(--text); text-decoration: none;
+		transition: border-color var(--speed), background var(--speed);
+	}
+	.file-card:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+	.file-card b { font-size: 12.5px; display: block; word-break: break-all; }
+	.file-card small { color: var(--muted); font-size: 11px; }
+	.file-card .grow { min-width: 0; }
+	.file-card .dl { margin-left: auto; color: var(--accent-2); flex-shrink: 0; }
 	.chat-pane {
 		flex: 1;
 		display: flex;
