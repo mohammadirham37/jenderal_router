@@ -276,8 +276,7 @@ export function buildDocx(title: string, src: string): Blob {
 
 // ---- XLSX ----
 
-const colLetter = (i: number): string => {
-	let s = '';
+const colLetter = (i: number): string => {	let s = '';
 	i++;
 	while (i > 0) {
 		s = String.fromCharCode(64 + ((i - 1) % 26) + 1) + s;
@@ -317,38 +316,26 @@ const sheetName = (name: string, used: Set<string>): string => {
 	return n;
 };
 
-export function buildXlsx(title: string, src: string): Blob {
-	const blocks = parseMarkdown(src);
-	const tables = blocks.filter((b): b is Extract<Block, { kind: 'table' }> => b.kind === 'table');
-	const used = new Set<string>();
-	const sheets: { name: string; rows: (string | number)[][] }[] = [];
+type Sheet = { name: string; rows: (string | number)[][] };
 
-	if (tables.length > 0) {
-		let no = 0;
-		let lastHeading = '';
-		for (const b of blocks) {
-			if (b.kind === 'heading') lastHeading = b.text;
-			if (b.kind !== 'table') continue;
-			no++;
-			const rows: (string | number)[][] = [[plain(lastHeading) || `Tabel ${no}`]];
-			rows.push(b.header.map(plain));
-			for (const r of b.rows) rows.push(b.header.map((_, ci) => asNumber(r[ci] ?? '')));
-			sheets.push({ name: sheetName(`Tabel${no} ${plain(lastHeading)}`, used), rows });
-		}
-	} else {
-		const rows: (string | number)[][] = [[title]];
-		for (const b of blocks) {
-			if (b.kind === 'heading') rows.push(['', plain(b.text)]);
-			else if (b.kind === 'bullet') rows.push(['• ' + plain(b.text)]);
-			else if (b.kind === 'code') b.text.split('\n').forEach((l) => rows.push([l]));
-			else if (b.kind === 'table') {
-				rows.push(b.header.map(plain));
-				b.rows.forEach((r) => rows.push(r.map(plain)));
-			} else if (b.kind === 'quote' || b.kind === 'para') rows.push([plain(b.text)]);
-		}
-		sheets.push({ name: sheetName('Catatan', used), rows });
+// sheet per tabel markdown (judul dari heading terdekat di atasnya)
+function tableSheets(blocks: Block[], used: Set<string>): Sheet[] {
+	const out: Sheet[] = [];
+	let no = 0;
+	let lastHeading = '';
+	for (const b of blocks) {
+		if (b.kind === 'heading') lastHeading = b.text;
+		if (b.kind !== 'table') continue;
+		no++;
+		const rows: (string | number)[][] = [[plain(lastHeading) || `Tabel ${no}`]];
+		rows.push(b.header.map(plain));
+		for (const r of b.rows) rows.push(b.header.map((_, ci) => asNumber(r[ci] ?? '')));
+		out.push({ name: sheetName(`Tabel${no} ${plain(lastHeading)}`, used), rows });
 	}
+	return out;
+}
 
+function xlsxZip(sheets: Sheet[]): Blob {
 	const zip = new ZipWriter();
 	const ct = [
 		'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
@@ -384,6 +371,25 @@ export function buildXlsx(title: string, src: string): Blob {
 	);
 	sheets.forEach((s, i) => zip.add(`xl/worksheets/sheet${i + 1}.xml`, xlsxSheet(s.rows)));
 	return zip.finish();
+}
+
+export function buildXlsx(title: string, src: string): Blob {
+	const blocks = parseMarkdown(src);
+	const used = new Set<string>();
+	const tables = tableSheets(blocks, used);
+	if (tables.length > 0) return xlsxZip(tables);
+
+	const rows: (string | number)[][] = [[title]];
+	for (const b of blocks) {
+		if (b.kind === 'heading') rows.push(['', plain(b.text)]);
+		else if (b.kind === 'bullet') rows.push(['• ' + plain(b.text)]);
+		else if (b.kind === 'code') b.text.split('\n').forEach((l) => rows.push([l]));
+		else if (b.kind === 'table') {
+			rows.push(b.header.map(plain));
+			b.rows.forEach((r) => rows.push(r.map(plain)));
+		} else if (b.kind === 'quote' || b.kind === 'para') rows.push([plain(b.text)]);
+	}
+	return xlsxZip([{ name: sheetName('Catatan', used), rows }]);
 }
 
 // ---- PPTX ----
@@ -541,6 +547,60 @@ export function buildCsv(title: string, src: string): Blob {
 	}
 	// BOM agar Excel menampilkan UTF-8 dengan benar
 	return new Blob(['\uFEFF' + text], { type: 'text/csv;charset=utf-8' });
+}
+
+// ---- ekspor seluruh percakapan ----
+
+export type ChatTurn = { role: 'user' | 'assistant' | 'tool'; content: string; model?: string };
+
+const roleLabel = (role: string): string =>
+	role === 'user' ? 'Anda' : role === 'assistant' ? 'Assistant' : role;
+
+// transkrip sebagai markdown: judul + satu section per pesan, sehingga
+// builder docx/pptx yang ada bisa dipakai ulang apa adanya
+function conversationMarkdown(title: string, turns: ChatTurn[]): string {
+	const parts = [`# ${title}`, ''];
+	for (const t of turns) {
+		if (!t.content) continue;
+		parts.push(t.role === 'assistant' && t.model ? `## Assistant — ${t.model}` : `## ${roleLabel(t.role)}`);
+		parts.push('');
+		parts.push(t.content);
+		parts.push('');
+	}
+	return parts.join('\n');
+}
+
+export function buildConversationXlsx(title: string, turns: ChatTurn[], md: string): Blob {
+	const used = new Set<string>();
+	const sheets: Sheet[] = [
+		{
+			name: sheetName('Transkrip', used),
+			rows: [[title], ['Peran', 'Pesan'], ...turns.filter((t) => t.content).map((t) => [roleLabel(t.role), t.content])]
+		}
+	];
+	sheets.push(...tableSheets(parseMarkdown(md), used));
+	return xlsxZip(sheets);
+}
+
+export function buildConversationCsv(turns: ChatTurn[]): Blob {
+	const lines = ['Peran;Pesan'];
+	for (const t of turns) {
+		if (!t.content) continue;
+		lines.push([roleLabel(t.role), t.content].map(csvCell).join(';'));
+	}
+	return new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+}
+
+// Ekspor seluruh percakapan (semua pesan user + assistant) ke satu file.
+export function exportConversation(title: string, turns: ChatTurn[], fmt: ExportFormat) {
+	const md = conversationMarkdown(title, turns);
+	let blob: Blob;
+	if (fmt === 'md') blob = new Blob([md], { type: MIME.md });
+	else if (fmt === 'docx') blob = buildDocx(title, md);
+	else if (fmt === 'pptx') blob = buildPptx(title, md);
+	else if (fmt === 'xlsx') blob = buildConversationXlsx(title, turns, md);
+	else blob = buildConversationCsv(turns);
+	download(`${fileBase(title)}.${fmt}`, blob);
 }
 
 // ---- unduhan ----

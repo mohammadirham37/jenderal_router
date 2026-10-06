@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Plus, Send, Trash2, X, Bot, Sparkles, History, Globe, Activity, Gauge, Download, FileText, File, Presentation, Sheet } from '@lucide/svelte';
 	import { api, md, fmtTs, fmtNum } from '$lib/api';
-	import { exportAnswer, type ExportFormat } from '$lib/exporters';
+	import { exportAnswer, exportConversation, type ExportFormat } from '$lib/exporters';
 	import { t, toast } from '$lib/stores.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 
@@ -22,6 +22,7 @@
 	let quota = $state<any>(null);
 	let msgsEl = $state<HTMLElement | null>(null);
 	let showHistory = $state(false);
+	let showExport = $state(false);
 
 	// ringkasan kuota utk toolbar: constraint paling menekan yang ditampilkan;
 	// limit 0 (atau tanpa baris kuota) = unlimited
@@ -148,6 +149,27 @@
 		} catch (e: any) {
 			toast('ekspor gagal: ' + e.message, 'err');
 		}
+	}
+
+	// ---- ekspor seluruh percakapan dari toolbar ----
+	const CONV_EXPORTS: { fmt: ExportFormat; label: string; hint: string }[] = [
+		{ fmt: 'md', label: 'MD', hint: 'Markdown seluruh percakapan' },
+		{ fmt: 'docx', label: 'DOCX', hint: 'Dokumen Word seluruh percakapan' },
+		{ fmt: 'pptx', label: 'PPTX', hint: 'Presentasi ringkas percakapan' },
+		{ fmt: 'xlsx', label: 'XLSX', hint: 'Excel — transkrip + semua tabel' },
+		{ fmt: 'csv', label: 'CSV', hint: 'CSV transkrip (Peran; Pesan)' }
+	];
+	function doExportConv(fmt: ExportFormat) {
+		const turns = msgs
+			.filter((m) => m.content && m.role !== 'tool')
+			.map((m) => ({ role: m.role, content: m.content, model: m.model }));
+		if (!turns.length) return;
+		try {
+			exportConversation(convTitle(), turns, fmt);
+		} catch (e: any) {
+			toast('ekspor gagal: ' + e.message, 'err');
+		}
+		showExport = false;
 	}
 
 	async function send() {
@@ -306,6 +328,26 @@
 		<button class="btn ghost sm" onclick={() => (showHistory = true)}>
 			<History size={14} /> {t('history')}
 		</button>
+		<div class="export-wrap">
+			<button
+				class="btn ghost sm"
+				onclick={() => (showExport = !showExport)}
+				disabled={!msgs.some((m) => m.content)}
+				title={t('export_conv')}
+			>
+				<Download size={14} /> {t('export_conv')}
+			</button>
+			{#if showExport}
+				<div class="menu-backdrop" aria-hidden="true" onclick={() => (showExport = false)}></div>
+				<div class="export-menu" role="menu">
+					{#each CONV_EXPORTS as ex (ex.fmt)}
+						<button role="menuitem" onclick={() => doExportConv(ex.fmt)}>
+							<b>{ex.label}</b><span>{ex.hint}</span>
+						</button>
+					{/each}
+				</div>
+			{/if}
+		</div>
 		<button class="btn sm" onclick={newConversation}><Plus size={14} /> {t('new_chat')}</button>
 		<select bind:value={model} class="grow model-select">
 			{#each models as m (m.id)}
@@ -449,6 +491,23 @@
 		color: var(--accent-2); border-color: var(--accent);
 		background: color-mix(in srgb, var(--accent) 10%, transparent);
 	}
+	.export-wrap { position: relative; }
+	.export-menu {
+		position: absolute; top: calc(100% + 6px); left: 0; z-index: 40;
+		min-width: 290px; display: flex; flex-direction: column; gap: 2px;
+		background: var(--surface); border: 1px solid var(--border);
+		border-radius: 12px; padding: 6px;
+		box-shadow: 0 12px 32px rgb(0 0 0 / 0.18);
+	}
+	.export-menu button {
+		all: unset; cursor: pointer; display: flex; gap: 8px; align-items: baseline;
+		padding: 8px 10px; border-radius: 8px; font-size: 12.5px;
+		transition: background var(--speed);
+	}
+	.export-menu button:hover { background: var(--surface-2); }
+	.export-menu b { font-size: 11px; color: var(--accent-2); min-width: 36px; }
+	.export-menu span { color: var(--muted); }
+	.menu-backdrop { position: fixed; inset: 0; z-index: 39; background: transparent; }
 	.chat-pane {
 		flex: 1;
 		display: flex;
