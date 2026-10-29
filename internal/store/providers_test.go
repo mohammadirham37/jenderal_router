@@ -363,3 +363,31 @@ func TestSeedProvidersFromTemplate(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// 403 moderasi tidak pernah menandai credential invalid; 403 biasa baru
+// invalid setelah beberapa kali berturut-turut.
+func TestCredential403Handling(t *testing.T) {
+	s := newTestStore(t)
+	p, err := s.CreateProvider(ProviderOpenAICompat, "P", "pp", "https://x.example", CredentialSettings{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _ := s.AddCredential(p.ID, "k", "sk-1", 1)
+	for i := 0; i < 5; i++ {
+		_ = s.MarkCredentialFailure(c.ID, 403, "Input was flagged by moderation")
+	}
+	if got, _ := s.GetCredential(c.ID); got.Status == "invalid" {
+		t.Fatal("403 moderasi menandai invalid")
+	}
+	c2, _ := s.AddCredential(p.ID, "k2", "sk-2", 1)
+	_ = s.MarkCredentialFailure(c2.ID, 403, "forbidden")
+	if got, _ := s.GetCredential(c2.ID); got.Status == "invalid" {
+		t.Fatal("403 pertama langsung invalid")
+	}
+	for i := 0; i < 3; i++ {
+		_ = s.MarkCredentialFailure(c2.ID, 403, "forbidden")
+	}
+	if got, _ := s.GetCredential(c2.ID); got.Status != "invalid" {
+		t.Fatal("403 berulang harus invalid")
+	}
+}

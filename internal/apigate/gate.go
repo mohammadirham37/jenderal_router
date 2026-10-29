@@ -196,6 +196,26 @@ func (g *Gate) CheckRateLimit(keyID int64, rpm int) *APIError {
 	return nil
 }
 
+// CheckTPM menolak request bila jendela token menit ini sudah mencapai batas
+// TPM key (0 = tanpa batas). Token dicatat setelah selesai lewat RecordTPM.
+func (g *Gate) CheckTPM(keyID int64, tpm int) *APIError {
+	if tpm <= 0 {
+		return nil
+	}
+	g.tpmMu.Lock()
+	defer g.tpmMu.Unlock()
+	w := g.tpm[keyID]
+	elapsed := time.Since(w.start)
+	if elapsed >= time.Minute || w.tokens < tpm {
+		return nil
+	}
+	retry := 60 - int(elapsed.Seconds())
+	if retry < 1 {
+		retry = 1
+	}
+	return errRateLimited(retry, "batas "+itoa(tpm)+" token/menit terlampaui")
+}
+
 // RecordTPM mencatat token dan menegakkan TPM (0 = tanpa batas).
 func (g *Gate) RecordTPM(keyID int64, tpm int, tokens int) *APIError {
 	if tpm <= 0 {

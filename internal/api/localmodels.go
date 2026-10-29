@@ -246,7 +246,21 @@ var modelDlState struct {
 }
 
 // owner/repo atau owner/repo:file.gguf — HF slug + nama file GGUF.
-var hfSpecRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(:[A-Za-z0-9_.-]+)?$`)
+// tiap segmen wajib diawali alfanumerik — mencegah argumen dibaca CLI
+// sebagai flag (mis. "-o/tmp") — dan ".." ditolak terpisah.
+var hfSpecRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*(:[A-Za-z0-9][A-Za-z0-9_.-]*)?$`)
+
+// validHFSpec memeriksa spesifikasi owner/repo[:file] untuk `llamastash pull`.
+func validHFSpec(spec string) bool {
+	return len(spec) <= 300 && hfSpecRe.MatchString(spec) && !strings.Contains(spec, "..")
+}
+
+// localModelNameRe nama model lokal untuk `llamastash start|stop <nama>`.
+var localModelNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,199}$`)
+
+func validLocalModelName(name string) bool {
+	return localModelNameRe.MatchString(name) && !strings.Contains(name, "..")
+}
 
 func (a *App) handleLocalModelDownload(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -263,7 +277,7 @@ func (a *App) handleLocalModelDownload(w http.ResponseWriter, r *http.Request) {
 	if req.File != "" {
 		spec = req.Repo + ":" + req.File
 	}
-	if !hfSpecRe.MatchString(spec) {
+	if !validHFSpec(spec) {
 		writeJSON(w, 400, map[string]string{"error": "format tidak sah — pakai owner/repo atau owner/repo:file.gguf"})
 		return
 	}
@@ -282,6 +296,10 @@ func (a *App) handleLocalModelDownload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		spec = ggufRepo + ":" + file
+		if !validHFSpec(spec) {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "hasil resolusi repo tidak sah: " + spec})
+			return
+		}
 		resolved = spec
 	}
 	modelDlState.mu.Lock()

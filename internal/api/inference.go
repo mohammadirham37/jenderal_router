@@ -236,6 +236,8 @@ func (sr *stepRun) do(ctx context.Context, internal *translate.ChatRequest) (*ro
 			sr.markFailure(err)
 			return nil, err
 		}
+		// header 200 diterima: credential sehat (reset fail_count/backoff)
+		sr.app.st.MarkCredentialSuccess(sr.cred.ID)
 		return &router.AttemptResult{
 			ProviderID: sr.prov.ID, ProviderName: sr.prov.Name,
 			ModelPublic: sr.step.PublicID, ModelDisplay: sr.step.Display(),
@@ -290,12 +292,18 @@ func (sr *stepRun) timeout() time.Duration {
 }
 
 // markFailure mencatat kegagalan credential (cooldown FR-1.4).
+// Error akibat isi request klien (400/404/413/422, batal 499) bukan
+// kesalahan credential — tidak dihitung agar member tidak bisa membuat key
+// bersama masuk cooldown/invalid.
 func (sr *stepRun) markFailure(err error) {
 	status := 0
 	if ue, ok := err.(*translate.UpstreamError); ok {
 		status = ue.StatusCode
 	}
-	_ = sr.app.st.MarkCredentialFailure(sr.cred.ID, status, err.Error())
+	switch {
+	case status == 401, status == 403, status == 402, status == 429, status == 408, status == 0, status >= 500:
+		_ = sr.app.st.MarkCredentialFailure(sr.cred.ID, status, err.Error())
+	}
 }
 
 // ===== LocalGate: konkurensi & antrean model lokal (FR-6.5) =====

@@ -216,14 +216,17 @@ func (r *Runner) Run(ctx context.Context, steps []Step) (*AttemptResult, []Attem
 			lastErr = err
 			attempts = append(attempts, AttemptData{StepIndex: i, ProviderID: step.ProviderID,
 				ProviderName: step.PublicID, ModelPublic: step.PublicID, Err: err})
-			opened := breaker.RecordFailure()
-			slog.Warn("langkah gagal", "step", i, "model", step.PublicID, "err", err, "breaker_open", opened)
 			// Error yang tidak layak fallback (400, penolakan konten) menghentikan
 			// seluruh rantai — mencoba provider lain tidak akan menolong (FR-2.2).
+			// Error itu juga TIDAK dihitung ke breaker: request buatan klien
+			// (mis. 400, batal 499) tidak boleh mematikan provider bagi semua.
 			var ue *UpstreamError
 			if !errors.As(err, &ue) || !ue.Retryable() {
+				slog.Warn("langkah gagal (tidak layak fallback)", "step", i, "model", step.PublicID, "err", err)
 				return nil, attempts, err
 			}
+			opened := breaker.RecordFailure()
+			slog.Warn("langkah gagal", "step", i, "model", step.PublicID, "err", err, "breaker_open", opened)
 			if ctx.Err() != nil {
 				return nil, attempts, ctx.Err()
 			}

@@ -315,7 +315,9 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 		}
 		wmu.Unlock()
 	}
-	res.Stream.Close()
+	if res.Stream != nil {
+		res.Stream.Close()
+	}
 	rec.Status = http.StatusOK
 	rec.LatencyMs = time.Since(start).Milliseconds()
 	a.applyCost(&rec, res.ModelPublic)

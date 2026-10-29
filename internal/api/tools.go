@@ -6,6 +6,7 @@ package api
 // HTML → teks sederhana.
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -81,7 +82,8 @@ func (a *App) handleToolWebFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	// klien publik: IP diperiksa saat dial (redirect & DNS rebinding ikut terjaga)
+	client := provider.NewPublicHTTPClient(30 * time.Second)
 	req2, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": "URL tidak sah: " + err.Error()})
@@ -90,7 +92,11 @@ func (a *App) handleToolWebFetch(w http.ResponseWriter, r *http.Request) {
 	req2.Header.Set("User-Agent", "Mozilla/5.0 (compatible; JenderalRouterBot/1.0; +webfetch tool)")
 	resp, err := client.Do(req2)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "gagal mengakses situs: " + err.Error()})
+		msg := "gagal mengakses situs"
+		if errors.Is(err, provider.ErrSSRFBlocked) {
+			msg = "alamat internal/privat tidak diizinkan"
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": msg})
 		return
 	}
 	defer resp.Body.Close()

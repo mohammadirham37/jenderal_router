@@ -241,7 +241,7 @@ type llamastashModelRow struct {
 	Name         string `json:"name"`
 	DisplayLabel string `json:"display_label"`
 	Repo         string `json:"repo"`
-	Status *struct {
+	Status       *struct {
 		State string `json:"state"`
 		Port  int    `json:"port"`
 	} `json:"status"`
@@ -431,18 +431,25 @@ func (a *App) handleLocalInstall(w http.ResponseWriter, r *http.Request) {
 		job.setPhase("mengunduh installer")
 		bin := findLlamastashBin()
 		if bin == "" {
-			if err := job.runStreamed(ctx, "curl", "-fsSL", llamastashInstallURL, "-o", "/tmp/llamastash-install.sh"); err != nil {
+			// direktori sementara privat (bukan /tmp bersama yang bisa ditukar user lain)
+			tmpDir, err := os.MkdirTemp("", "llamastash-install-")
+			if err != nil {
+				job.fail("membuat direktori sementara gagal: " + err.Error())
+				return
+			}
+			defer os.RemoveAll(tmpDir)
+			script := filepath.Join(tmpDir, "install.sh")
+			if err := job.runStreamed(ctx, "curl", "-fsSL", llamastashInstallURL, "-o", script); err != nil {
 				job.fail("unduh installer gagal: " + err.Error())
 				a.st.Audit(actorID, "local.install", "llamastash", nil, map[string]any{"ok": false, "error": "download"})
 				return
 			}
 			job.setPhase("menjalankan installer")
-			if err := job.runStreamed(ctx, "sh", "/tmp/llamastash-install.sh"); err != nil {
+			if err := job.runStreamed(ctx, "sh", script); err != nil {
 				job.fail("installer gagal: " + err.Error())
 				a.st.Audit(actorID, "local.install", "llamastash", nil, map[string]any{"ok": false, "error": "installer"})
 				return
 			}
-			_ = os.Remove("/tmp/llamastash-install.sh")
 			bin = findLlamastashBin()
 			if bin == "" {
 				job.fail("installer selesai tetapi binary llamastash tidak ditemukan")

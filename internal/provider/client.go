@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -29,6 +30,9 @@ type Client struct {
 func NewClient() *Client {
 	return &Client{
 		HTTP: &http.Client{
+			// redirect upstream TIDAK diikuti: header API key (x-api-key,
+			// x-goog-api-key) ikut terkirim ke host tujuan redirect
+			CheckRedirect: noRedirect,
 			// Timeout dikelola per-request lewat context.
 			Transport: &http.Transport{
 				MaxIdleConns:        200,
@@ -136,7 +140,8 @@ func (c *Client) Stream(ctx context.Context, r UpstreamReq) (*EventStream, error
 	if r.Timeout > 0 {
 		tr := c.HTTP.Transport.(*http.Transport).Clone()
 		tr.ResponseHeaderTimeout = r.Timeout
-		client = &http.Client{Transport: tr}
+		tr.DisableKeepAlives = true // transport sekali pakai: jangan tinggalkan koneksi idle
+		client = &http.Client{Transport: tr, CheckRedirect: noRedirect}
 	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
@@ -296,8 +301,12 @@ func classifyTransport(err error) *translate.UpstreamError {
 	if errors.Is(err, context.Canceled) {
 		return &translate.UpstreamError{StatusCode: 499, Message: "dibatalkan klien"}
 	}
-	return &translate.UpstreamError{StatusCode: 0, Message: "koneksi provider gagal: " + err.Error()}
+	// detail (berisi URL/IP internal provider) hanya ke log, bukan ke klien
+	slog.Warn("koneksi provider gagal", "err", err)
+	return &translate.UpstreamError{StatusCode: 0, Message: "koneksi provider gagal"}
 }
+
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 // parseUpstreamError menormalkan body error provider sesuai format (FR-2.2).
 func parseUpstreamError(f translate.Format, status int, body []byte) *translate.UpstreamError {
@@ -387,7 +396,7 @@ func CheckBaseURL(baseURL string, isLocal, allowPrivate bool) error {
 		return nil
 	}
 	for _, ip := range ips {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+		if !IsPublicIP(ip) {
 			return ErrSSRFBlocked
 		}
 	}

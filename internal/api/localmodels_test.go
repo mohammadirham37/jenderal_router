@@ -68,3 +68,24 @@ func TestResolveGGUFTidakKetemu(t *testing.T) {
 		t.Fatalf("pesan tidak membimbing: %v", err)
 	}
 }
+
+// argumen ke CLI llamastash tidak boleh bisa dibaca sebagai flag / traversal.
+func TestLlamastashArgValidation(t *testing.T) {
+	for spec, ok := range map[string]bool{
+		"unsloth/Qwen3-30B-A3B-GGUF": true, "owner/repo:Q6_K.gguf": true,
+		"-o/tmp": false, "--x/y": false, "../..:..": false, "owner/-repo": false,
+		"owner/repo:-f": false, "a/b..c": false,
+	} {
+		if got := validHFSpec(spec); got != ok {
+			t.Errorf("validHFSpec(%q) = %v", spec, got)
+		}
+	}
+	for name, ok := range map[string]bool{
+		"Qwen3-30B-A3B-Q6_K": true, "org/model:q4": true,
+		"--config=x": false, "-h": false, "../etc/passwd": false, "": false,
+	} {
+		if got := validLocalModelName(name); got != ok {
+			t.Errorf("validLocalModelName(%q) = %v", name, got)
+		}
+	}
+}

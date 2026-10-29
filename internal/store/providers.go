@@ -335,8 +335,17 @@ func (s *Store) MarkCredentialFailure(id int64, statusCode int, message string) 
 		return err
 	}
 	if statusCode == 401 || statusCode == 403 {
-		// 401 berulang menandai key invalid
-		if c.FailCount >= 1 || statusCode == 403 {
+		// 401 berulang menandai key invalid. 403 sering berarti penolakan
+		// konten/moderasi (dipicu isi prompt member), jadi baru invalid
+		// setelah 3x berturut-turut dan tidak pernah bila pesannya moderasi.
+		lower := strings.ToLower(message)
+		moderation := strings.Contains(lower, "flagged") || strings.Contains(lower, "moderation") ||
+			strings.Contains(lower, "content policy") || strings.Contains(lower, "safety")
+		threshold := int64(1)
+		if statusCode == 403 {
+			threshold = 2
+		}
+		if !moderation && int64(c.FailCount) >= threshold {
 			_, err = s.DB.Exec(`UPDATE credentials SET fail_count = fail_count + 1, status = 'invalid',
 				last_error = ? WHERE id = ?`, message, id)
 			return err

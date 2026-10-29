@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jenderal/jenderalrouter/internal/apigate"
@@ -70,6 +71,11 @@ func (a *App) infer(w http.ResponseWriter, r *http.Request, inbound translate.Fo
 		a.writeGateError(w, inbound, apiErr)
 		return
 	}
+	// TPM → 429 bila token menit ini sudah habis
+	if apiErr := a.gate.CheckTPM(ac.Key.ID, ac.Key.TPM); apiErr != nil {
+		a.writeGateError(w, inbound, apiErr)
+		return
+	}
 	// resolusi model/alias/combo → 404 model_not_found
 	steps, err := a.resolver.Resolve(internal.Model)
 	if err != nil {
@@ -86,32 +92,25 @@ func (a *App) infer(w http.ResponseWriter, r *http.Request, inbound translate.Fo
 	}
 
 	// SSE header + keep-alive selama menunggu token pertama (FR-6.4)
-	keepDone := make(chan struct{})
+	// (goroutine ping memakai mutex + flush; Stop menunggu goroutine selesai
+	// sebelum handler menulis lagi — mencegah tulis/baca header bersamaan)
+	var ka *sseKeepAlive
 	if internal.Stream {
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("X-Accel-Buffering", "no")
 		if _, canFlush := w.(http.Flusher); canFlush {
-			go func() {
-				t := time.NewTicker(3 * time.Second)
-				defer t.Stop()
-				for {
-					select {
-					case <-keepDone:
-						return
-					case <-t.C:
-						fmt.Fprint(w, ": keep-alive\n\n")
-					}
-				}
-			}()
+			ka = startSSEKeepAlive(w, &sync.Mutex{}, 10*time.Second)
 		}
 	}
 
 	exec := newStepExecutor(a, internal, internal.Stream)
 	runner := &router.Runner{Breakers: a.breakers, Sender: exec.send, MaxRetrySameProvider: 1}
 	res, attempts, runErr := runner.Run(r.Context(), steps)
-	close(keepDone) // hentikan keep-alive sebelum menulis body
+	if ka != nil {
+		ka.Stop() // hentikan keep-alive sebelum menulis body
+	}
 
 	rec.Attempts = len(attempts) + 1
 	ttftMs := time.Since(start).Milliseconds()
@@ -146,6 +145,7 @@ func (a *App) infer(w http.ResponseWriter, r *http.Request, inbound translate.Fo
 	if internal.Stream {
 		// FR-2.3: fallback sudah selesai di runner; mulai sekarang error diteruskan
 		a.streamToClient(w, inbound, res, &rec, start, ttftMs, reqTokens)
+		_ = a.gate.RecordTPM(ac.Key.ID, ac.Key.TPM, rec.TokensIn+rec.TokensOut)
 		return
 	}
 

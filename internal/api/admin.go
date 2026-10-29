@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/csv"
 	"encoding/hex"
@@ -309,23 +310,19 @@ func (a *App) handleSyncModels(w http.ResponseWriter, r *http.Request) {
 // juga mencoba CLI `llamastash list --json` (FR-6.2).
 func (a *App) fetchUpstreamModels(p *store.Provider, key string) ([]string, string, error) {
 	client := provider.NewClient()
-	ctx, cancel := contextWithTimeout(nil, 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	_ = ctx
 	base := strings.TrimRight(p.BaseURL, "/")
 	var url string
 	switch p.Type {
 	case store.ProviderAnthropic:
 		url = base + "/v1/models"
 	case store.ProviderGemini:
-		url = base + "/models"
-		if key != "" {
-			url += "?key=" + key
-		}
+		url = base + "/models" // key lewat header, bukan query (tak bocor di pesan error)
 	default:
 		url = base + "/models"
 	}
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, "http", err
 	}
@@ -334,6 +331,9 @@ func (a *App) fetchUpstreamModels(p *store.Provider, key string) ([]string, stri
 		req.Header.Set("x-api-key", key)
 		req.Header.Set("anthropic-version", "2023-06-01")
 	case store.ProviderGemini:
+		if key != "" {
+			req.Header.Set("x-goog-api-key", key)
+		}
 	default:
 		if key != "" {
 			req.Header.Set("Authorization", "Bearer "+key)
@@ -1358,8 +1358,8 @@ func (a *App) handleLocalModelStop(w http.ResponseWriter, r *http.Request) {
 // localModelToggle menjalankan perintah CLI llamastash start/stop (FR-6.3).
 func (a *App) localModelToggle(w http.ResponseWriter, r *http.Request, action string) {
 	name := r.PathValue("name")
-	if name == "" {
-		writeJSON(w, 400, map[string]string{"error": "nama model wajib"})
+	if !validLocalModelName(name) {
+		writeJSON(w, 400, map[string]string{"error": "nama model tidak sah"})
 		return
 	}
 	path := findLlamastashBin()

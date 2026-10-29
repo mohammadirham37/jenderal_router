@@ -183,3 +183,17 @@ func TestRunnerContextCanceled(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// Error buatan klien (400, 499) tidak boleh membuka breaker bersama.
+func TestClientErrorsDoNotTripBreaker(t *testing.T) {
+	r := &Runner{Breakers: NewBreakers(), MaxRetrySameProvider: 1}
+	r.Sender = func(ctx context.Context, s Step) (*AttemptResult, error) {
+		return nil, &translate.UpstreamError{StatusCode: 400, Message: "max_tokens terlalu besar"}
+	}
+	for i := 0; i < 10; i++ {
+		_, _, _ = r.Run(context.Background(), []Step{step(1, 10)})
+	}
+	if r.Breakers.For(10).IsOpen() {
+		t.Fatal("breaker terbuka oleh error 400 klien")
+	}
+}

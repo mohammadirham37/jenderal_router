@@ -572,3 +572,48 @@ func TestModelChannelsChatVsAPI(t *testing.T) {
 		t.Fatalf("/v1 setelah API dinyalakan = %d %s", w.Code, w.Body.String())
 	}
 }
+
+// Chat dashboard non-stream: tidak panic dan pemakaian tetap tercatat
+// (sebelumnya panic setelah menjawab → kuota terlewati).
+func TestMeChatNonStreamRecordsUsage(t *testing.T) {
+	app, st, _ := appTestEnv(t)
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}`)
+	}))
+	defer mock.Close()
+	seedMockProvider(t, st, "Mock", "mk", mock.URL)
+	cookie, csrf := loginAs(app, t, "dev@test", "Sandi-Kuat-123")
+	w := dashReq(app, "POST", "/api/me/chat", map[string]any{
+		"model": "mk/mock-model", "stream": false,
+		"messages": []map[string]string{{"role": "user", "content": "hai"}},
+	}, cookie, csrf)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "ok") {
+		t.Fatalf("chat non-stream = %d %s", w.Code, w.Body.String())
+	}
+	app.rec.Close()
+	var n int
+	if err := st.DB.QueryRow(`SELECT COUNT(*) FROM request_logs WHERE key_id IS NULL`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("log chat = %d, %v; mau 1", n, err)
+	}
+}
+
+func TestTPMEnforced(t *testing.T) {
+	app, st, _ := appTestEnv(t)
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1000,"completion_tokens":1000}}`)
+	}))
+	defer mock.Close()
+	seedMockProvider(t, st, "Mock", "mk", mock.URL)
+	dev, _ := st.GetUserByEmail("dev@test")
+	plain, hash, _ := crypto.NewAPIKey()
+	if _, err := st.CreateAPIKey(dev.ID, "tpm", plain, hash, "", "*", "", 0, 10, ""); err != nil {
+		t.Fatal(err)
+	}
+	h := app.Handler()
+	if w := doJSON(t, h, "POST", "/v1/chat/completions", plain, inferBody("mk/mock-model", false)); w.Code != 200 {
+		t.Fatalf("request pertama = %d %s", w.Code, w.Body.String())
+	}
+	if w := doJSON(t, h, "POST", "/v1/chat/completions", plain, inferBody("mk/mock-model", false)); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("request kedua harus 429 (TPM), dapat %d %s", w.Code, w.Body.String())
+	}
+}
