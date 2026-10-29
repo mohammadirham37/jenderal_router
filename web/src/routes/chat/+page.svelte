@@ -684,7 +684,8 @@
 			color-mix(in srgb, var(--surface) 92%, transparent);
 	}
 	.scroller { flex: 1; overflow-y: auto; overscroll-behavior: contain; scroll-padding-bottom: 24px; }
-	.thread { max-width: 780px; margin: 0 auto; padding: 26px 22px 40px; }
+	/* lebar kolom baca: lega untuk tabel & kode, tetap nyaman dibaca */
+	.thread { --col: 960px; max-width: var(--col); margin: 0 auto; padding: 26px 28px 40px; }
 
 	/* ---------- sambutan ---------- */
 	.welcome { text-align: center; padding: 8vh 0 2vh; animation: rise 420ms cubic-bezier(.2,.7,.2,1); }
@@ -711,7 +712,7 @@
 	.turn { display: flex; gap: 12px; margin-bottom: 26px; animation: rise 260ms cubic-bezier(.2,.7,.2,1); }
 	.turn.user { justify-content: flex-end; }
 	.bubble {
-		max-width: min(78%, 620px); padding: 10px 16px; border-radius: 20px 20px 6px 20px;
+		max-width: min(80%, 760px); padding: 10px 16px; border-radius: 20px 20px 6px 20px;
 		background: var(--surface-3); border: 1px solid var(--border);
 		white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14.5px; line-height: 1.6;
 	}
@@ -802,11 +803,21 @@
 	.answer :global(.table-scroll) { overflow-x: auto; margin: 4px 0 14px; border: 1px solid var(--border); border-radius: 12px; }
 	.answer :global(table) { border-collapse: collapse; width: 100%; font-size: 13.5px; }
 	.answer :global(th), .answer :global(td) {
-		padding: 8px 12px; border-bottom: 1px solid var(--border); text-align: left;
+		padding: 8px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top;
 		overflow-wrap: normal; word-break: normal; /* tabel melebar & digulir, kata tidak dipotong */
 	}
 	.answer :global(th) { background: var(--surface-2); font-weight: 700; }
 	.answer :global(tr:last-child td) { border-bottom: 0; }
+	/* kode multi-baris di dalam sel tabel (model menulis <br>/&nbsp;) */
+	.answer :global(.cell-code) {
+		margin: 0; padding: 6px 8px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border);
+		white-space: pre; overflow-x: auto; max-width: 520px;
+	}
+	.answer :global(.cell-code code) { background: none; border: 0; padding: 0; font-size: 12px; line-height: 1.55; }
+	@media (min-width: 1500px) {
+		.thread { --col: 1080px; }
+		.composer { max-width: 1024px; }
+	}
 
 	/* kursor ketik di akhir jawaban yang sedang mengalir */
 	.answer.streaming :global(> :last-child::after) {
@@ -872,7 +883,7 @@
 		background: linear-gradient(to top, color-mix(in srgb, var(--surface) 92%, transparent), transparent);
 	}
 	.composer {
-		max-width: 780px; margin: 0 auto; border: 1px solid var(--border-strong); border-radius: 22px;
+		max-width: 904px; margin: 0 auto; border: 1px solid var(--border-strong); border-radius: 22px;
 		background: var(--surface); padding: 10px 10px 8px 16px;
 		box-shadow: 0 6px 28px rgb(0 0 0 / .14);
 		transition: border-color var(--speed), box-shadow var(--speed);

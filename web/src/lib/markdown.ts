@@ -6,9 +6,38 @@
 const esc = (x: string) =>
 	x.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
+// Model sering menulis <br> dan entitas HTML (&nbsp; dll) — terutama di sel
+// tabel untuk kode multi-baris. Ubah ke karakter biasa DULU; setelah itu
+// semuanya tetap di-escape seperti teks lain (aman XSS).
+export function decodeSafe(s: string): string {
+	return s
+		.replace(/<br\s*\/?>/gi, '\n')
+		.replace(/&nbsp;/g, '\u00a0')
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&quot;/g, '"')
+		.replace(/&#0?39;|&apos;/g, "'")
+		.replace(/&amp;/g, '&');
+}
+
+export const looksLikeCode = (s: string) =>
+	/[{};]|:=|=>|^\s*(func|def|class|import|package|return|if|for|const|let|var)\b|^[\u00a0 ]{2,}\S/m.test(s);
+
 // inline: kode & link diamankan dulu sebagai placeholder agar format
-// (*, **, ~~) di dalamnya tidak ikut diubah
+// (*, **, ~~) di dalamnya tidak ikut diubah; baris baru dari <br> → <br>
 function inline(src: string): string {
+	const text = decodeSafe(src);
+	return text.includes('\n') ? text.split('\n').map(inlineOne).join('<br>') : inlineOne(text);
+}
+
+// isi sel tabel: kode multi-baris tampil sebagai blok kode kecil
+function cellHtml(src: string): string {
+	const text = decodeSafe(src);
+	if (text.includes('\n') && looksLikeCode(text)) return `<pre class="cell-code"><code>${esc(text)}</code></pre>`;
+	return inline(src);
+}
+
+function inlineOne(src: string): string {
 	const slots: string[] = [];
 	const keep = (html: string) => `\u0000${slots.push(html) - 1}\u0000`;
 	let s = esc(src);
@@ -91,10 +120,10 @@ export function md(src: string): string {
 		if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && isTableSep(lines[i + 1])) {
 			flushAll();
 			const head = cells(line);
-			html += '<div class="table-scroll"><table><thead><tr>' + head.map((c) => `<th>${inline(c)}</th>`).join('') + '</tr></thead><tbody>';
+			html += '<div class="table-scroll"><table><thead><tr>' + head.map((c) => `<th>${cellHtml(c)}</th>`).join('') + '</tr></thead><tbody>';
 			i += 2;
 			while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
-				html += '<tr>' + cells(lines[i]).map((c) => `<td>${inline(c)}</td>`).join('') + '</tr>';
+				html += '<tr>' + cells(lines[i]).map((c) => `<td>${cellHtml(c)}</td>`).join('') + '</tr>';
 				i++;
 			}
 			i--;

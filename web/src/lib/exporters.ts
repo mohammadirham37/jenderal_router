@@ -2,6 +2,7 @@
 // Semua dibangun mandiri (ZIP metode STORE + OOXML minimal) agar tidak
 // menambah dependensi npm — lingkungan build web terbatas.
 
+import { decodeSafe } from './markdown.js';
 import { buildReportDocx } from './docgen/report.js';
 import { buildDeckPptx } from './docgen/deck.js';
 
@@ -120,6 +121,9 @@ export type Block =
 	| { kind: 'code'; text: string }
 	| { kind: 'table'; header: string[]; rows: string[][] };
 
+// teks biasa: <br>/entitas → karakter, baris baru → spasi
+const flat = (s: string) => decodeSafe(s).replace(/\s*\n\s*/g, ' ');
+
 export function parseMarkdown(src: string): Block[] {
 	const lines = src.replace(/\r\n?/g, '\n').split('\n');
 	const blocks: Block[] = [];
@@ -137,14 +141,15 @@ export function parseMarkdown(src: string): Block[] {
 		const h = line.match(/^(#{1,6})\s+(.*)/);
 		if (h) {
 			// model kadang menulis "## # Judul" — buang pagar ekstra
-			blocks.push({ kind: 'heading', level: h[1].length, text: h[2].replace(/^#+\s+/, '').trim() });
+			blocks.push({ kind: 'heading', level: h[1].length, text: flat(h[2].replace(/^#+\s+/, '').trim()) });
 			i++;
 			continue;
 		}
 		// tabel: baris berpipe + baris pemisah berikutnya
 		if (line.includes('|') && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1])) {
+			// sel boleh multi-baris (model menulis <br>) — dipertahankan sebagai "\n"
 			const cells = (l: string) =>
-				l.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim());
+				l.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => decodeSafe(c.trim()).replace(/[ \t]+$/gm, ''));
 			const header = cells(line);
 			i += 2;
 			const rows: string[][] = [];
@@ -157,13 +162,13 @@ export function parseMarkdown(src: string): Block[] {
 		}
 		const b = line.match(/^(\s*)[-*+]\s+(.*)/);
 		if (b) {
-			blocks.push({ kind: 'bullet', level: Math.min(2, Math.floor(b[1].length / 2)), text: b[2].trim() });
+			blocks.push({ kind: 'bullet', level: Math.min(2, Math.floor(b[1].length / 2)), text: flat(b[2].trim()) });
 			i++;
 			continue;
 		}
 		const o = line.match(/^(\s*)\d+[.)]\s+(.*)/);
 		if (o) {
-			blocks.push({ kind: 'bullet', ordered: true, level: Math.min(2, Math.floor(o[1].length / 3)), text: o[2].trim() });
+			blocks.push({ kind: 'bullet', ordered: true, level: Math.min(2, Math.floor(o[1].length / 3)), text: flat(o[2].trim()) });
 			i++;
 			continue;
 		}
@@ -173,7 +178,7 @@ export function parseMarkdown(src: string): Block[] {
 		}
 		const q = line.match(/^\s*>\s?(.*)/);
 		if (q) {
-			blocks.push({ kind: 'quote', text: q[1].trim() });
+			blocks.push({ kind: 'quote', text: flat(q[1].trim()) });
 			i++;
 			continue;
 		}
@@ -191,7 +196,7 @@ export function parseMarkdown(src: string): Block[] {
 			buf.push(lines[i].trim());
 			i++;
 		}
-		blocks.push({ kind: 'para', text: buf.join(' ') });
+		blocks.push({ kind: 'para', text: flat(buf.join(' ')) });
 	}
 	return blocks;
 }
@@ -474,18 +479,25 @@ export const DOC_SYSTEM: Record<DocType, string> = {
 		' Sajikan TEPAT SATU tabel markdown dengan baris header dan pemisah "|---|". Isi sel berupa nilai murni tanpa karakter pipe. Tanpa narasi.'
 };
 
-const DOC_PATTERNS: [RegExp, DocType][] = [
-	[/\b(pptx?|power\s*point|presentasi\w*|slide\w*|deck|salindia)\b/i, 'pptx'],
-	[/\b(xlsx?|excel|spreadsheet|lembar\s+kerja)\b/i, 'xlsx'],
-	[/\bcsv\b/i, 'csv'],
-	[/\b(docx?|word|dokumen\w*|laporan|makalah|proposal|notulen|surat|sop|artikel|esai|essay|modul|rpp|report)\b/i, 'docx']
+const DOC_TYPES: [string, DocType][] = [
+	['pptx?|power\\s*point|presentasi\\w*|slide\\w*|deck|salindia', 'pptx'],
+	['xlsx?|excel|spreadsheet|lembar\\s+kerja', 'xlsx'],
+	['csv', 'csv'],
+	['docx?|word|dokumen\\w*|laporan|makalah|proposal|notulen|surat|sop|artikel|esai|essay|modul|rpp|report', 'docx']
 ];
+const VERB = '(?:buat\\w*|bikin\\w*|susun\\w*|siapkan|tuliskan|tulis|rancang\\w*|generate|create|make|draft\\w*)';
+// konteks pemrograman di antara kata kerja & format → yang diminta kode, bukan file
+const CODE_CTX = /\b(fungsi|function|kode|code|script|skrip|program|query|kelas|class|parser|regex|api|endpoint|baca|membaca|read|parse|import|ekspor|export)\b/i;
 
-// Deteksi permintaan pembuatan file dari prompt user: harus ada kata kerja
-// buat + jenis dokumen, agar pertanyaan biasa ("apa itu ppt") tidak kena.
+// Deteksi permintaan pembuatan file: format harus menjadi OBJEK kata kerja
+// (maks 4 kata sesudahnya), bukan sekadar disebut — "Tulis fungsi Go untuk
+// membaca file CSV" adalah permintaan kode, bukan file CSV.
 export function detectDocRequest(text: string): DocType | null {
-	if (!/\b(buat\w*|bikin\w*|susun\w*|siapkan|tuliskan|tulis|rancang\w*|generate|create|make|draft\w*)\b/i.test(text)) return null;
-	for (const [re, type] of DOC_PATTERNS) if (re.test(text)) return type;
+	for (const [fmt, type] of DOC_TYPES) {
+		const re = new RegExp(`\\b${VERB}\\b((?:\\s+\\S+){0,4}?)\\s+(?:${fmt})\\b`, 'i');
+		const m = text.match(re);
+		if (m && !CODE_CTX.test(m[1])) return type;
+	}
 	return null;
 }
 

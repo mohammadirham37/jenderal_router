@@ -3,6 +3,7 @@
 // (bukan karakter •), tabel dengan lebar DXA ganda + shading CLEAR, PageBreak
 // di dalam Paragraph, tanpa "\n" di teks. Library dimuat dinamis saat dipakai.
 import { parseMarkdown, inlineRuns, plain, type Block } from '../exporters.js';
+import { looksLikeCode } from '../markdown.js';
 
 const FONT = 'Calibri';
 const MONO = 'Consolas';
@@ -84,12 +85,21 @@ export async function buildReportDocx(fallbackTitle: string, md: string): Promis
 	let listInstance = 0;
 	let prevWasList = false;
 
-	const cellPara = (text: string, header: boolean, align: (typeof AlignmentType)[keyof typeof AlignmentType]) =>
-		new Paragraph({
-			alignment: align,
-			spacing: { before: 40, after: 40 },
-			children: runs(text, { size: 19, bold: header, color: header ? 'FFFFFF' : C.ink })
-		});
+	// sel bisa multi-baris (model menulis <br>): satu Paragraph per baris (tanpa "\n");
+	// isi berupa kode → font monospace, indentasi dipertahankan
+	const cellParas = (text: string, header: boolean, align: (typeof AlignmentType)[keyof typeof AlignmentType]) => {
+		const lines = text.split('\n');
+		const code = !header && lines.length > 1 && looksLikeCode(text);
+		return lines.map((line, i) =>
+			new Paragraph({
+				alignment: code ? AlignmentType.LEFT : align,
+				spacing: { before: i === 0 ? 40 : 0, after: i === lines.length - 1 ? 40 : 0 },
+				children: code
+					? [new TextRun({ text: line.replace(/^[ \u00a0]+/, (m) => '\u00a0'.repeat(m.length)) || ' ', font: MONO, size: 16, color: '334155' })]
+					: runs(line, { size: 19, bold: header, color: header ? 'FFFFFF' : C.ink })
+			})
+		);
+	};
 
 	const table = (header: string[], rows: string[][]) => {
 		const cols = Math.max(header.length, ...rows.map((r) => r.length));
@@ -118,7 +128,7 @@ export async function buildReportDocx(fallbackTitle: string, md: string): Promis
 					: zebra
 						? { type: ShadingType.CLEAR, color: 'auto', fill: C.zebra }
 						: undefined,
-				children: [cellPara(text, header, numeric[c] && !header ? AlignmentType.RIGHT : AlignmentType.LEFT)]
+				children: cellParas(text, header, numeric[c] && !header ? AlignmentType.RIGHT : AlignmentType.LEFT)
 			});
 		return new Table({
 			width: { size: CONTENT_W, type: WidthType.DXA },
