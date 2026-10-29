@@ -4,6 +4,7 @@
 package apigate
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -227,18 +228,99 @@ func extractAPIKey(r *http.Request) string {
 	return ""
 }
 
-// ClientIP mengambil IP klien (mendukung X-Forwarded-For dari Caddy).
-func ClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
+// trustedProxies jaringan proxy yang header X-Forwarded-For-nya dipercaya.
+// Default hanya loopback (Caddy/cloudflared di host yang sama); tambah lewat
+// JR_TRUSTED_PROXIES. Header dari klien lain diabaikan — tanpa ini XFF bisa
+// dipalsukan untuk melewati rate limit login dan IP allowlist key.
+var trustedProxies = mustCIDRs("127.0.0.0/8", "::1/128")
+
+func mustCIDRs(cidrs ...string) []*net.IPNet {
+	out, err := parseCIDRs(cidrs)
+	if err != nil {
+		panic(err)
 	}
-	if xr := r.Header.Get("X-Real-IP"); xr != "" {
-		return strings.TrimSpace(xr)
+	return out
+}
+
+func parseCIDRs(cidrs []string) ([]*net.IPNet, error) {
+	var out []*net.IPNet
+	for _, c := range cidrs {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		if !strings.Contains(c, "/") {
+			if ip := net.ParseIP(c); ip != nil && ip.To4() != nil {
+				c += "/32"
+			} else {
+				c += "/128"
+			}
+		}
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			return nil, fmt.Errorf("JR_TRUSTED_PROXIES: %q tidak sah: %w", c, err)
+		}
+		out = append(out, n)
 	}
+	return out, nil
+}
+
+// SetTrustedProxies menambahkan CIDR/IP proxy tepercaya ke loopback.
+func SetTrustedProxies(cidrs []string) error {
+	extra, err := parseCIDRs(cidrs)
+	if err != nil {
+		return err
+	}
+	trustedProxies = append(mustCIDRs("127.0.0.0/8", "::1/128"), extra...)
+	return nil
+}
+
+func trusted(ip net.IP) bool {
+	for _, n := range trustedProxies {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// FromTrustedProxy true bila koneksi langsung berasal dari proxy tepercaya.
+func FromTrustedProxy(r *http.Request) bool {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && trusted(ip)
+}
+
+// ClientIP mengambil IP klien. Header proxy hanya dibaca bila koneksi datang
+// dari proxy tepercaya; X-Forwarded-For dibaca dari KANAN (entri yang
+// ditambahkan proxy kita sendiri), melewati hop proxy tepercaya.
+func ClientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	peer := net.ParseIP(host)
+	if peer == nil || !trusted(peer) {
+		return host
+	}
+	if xff := strings.Join(r.Header.Values("X-Forwarded-For"), ","); xff != "" {
+		parts := strings.Split(xff, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			ip := net.ParseIP(strings.TrimSpace(parts[i]))
+			if ip == nil {
+				break
+			}
+			if trusted(ip) && i > 0 {
+				continue
+			}
+			return ip.String()
+		}
+	}
+	if ip := net.ParseIP(strings.TrimSpace(r.Header.Get("X-Real-IP"))); ip != nil {
+		return ip.String()
 	}
 	return host
 }

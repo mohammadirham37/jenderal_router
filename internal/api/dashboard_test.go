@@ -70,8 +70,9 @@ func TestSetupWizardFlow(t *testing.T) {
 
 func TestSetupPasswordWeakRejected(t *testing.T) {
 	app, st, _ := appTestEnv(t)
-	// buat store baru tanpa super admin: hapus semua user
+	// simulasikan instalasi baru: tanpa user dan tanpa penanda setup
 	st.DB.Exec(`DELETE FROM users`)
+	st.DB.Exec(`DELETE FROM settings WHERE key = ?`, store.SetupDoneKey)
 	w := dashReq(app, "GET", "/api/setup/status", nil, "", "")
 	if !strings.Contains(w.Body.String(), `"needs_setup":true`) {
 		t.Fatalf("harus needs_setup: %s", w.Body.String())
@@ -419,4 +420,17 @@ func TestAdminViewUserChats(t *testing.T) {
 	if w = dashReq(app, "GET", base, nil, c2, ""); w.Code != 200 {
 		t.Fatalf("admin baca chat member: %d", w.Code)
 	}
+}
+
+// dashReqWith seperti dashReq tanpa sesi, dengan header tambahan.
+func dashReqWith(app *App, method, path string, body any, headers map[string]string) *httptest.ResponseRecorder {
+	b, _ := json.Marshal(body)
+	r := httptest.NewRequest(method, path, bytes.NewReader(b))
+	r.RemoteAddr = "198.51.100.1:7777"
+	for k, v := range headers {
+		r.Header.Set(k, v)
+	}
+	w := httptest.NewRecorder()
+	app.Handler().ServeHTTP(w, r)
+	return w
 }

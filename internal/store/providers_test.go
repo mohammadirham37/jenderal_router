@@ -199,7 +199,7 @@ func TestModelCRUDAndLookup(t *testing.T) {
 	}
 
 	newPrice := 2.0
-	if err := s.UpdateModelFields(m.ID, nil, nil, &newPrice, nil, nil, nil, boolPtr(false)); err != nil {
+	if err := s.UpdateModelFields(m.ID, nil, nil, &newPrice, nil, nil, nil, boolPtr(false), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	m, _ = s.GetModel(m.ID)

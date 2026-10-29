@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jenderal/jenderalrouter/internal/apigate"
 	"github.com/jenderal/jenderalrouter/internal/crypto"
 	"github.com/jenderal/jenderalrouter/internal/store"
 )
@@ -36,6 +38,14 @@ func (l *loginLimiter) allow(ip string) (bool, int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
+	if len(l.attempts) > 1000 {
+		// pangkas entri kedaluwarsa agar map tidak tumbuh tanpa batas
+		for k, ts := range l.attempts {
+			if len(ts) == 0 || now.Sub(ts[len(ts)-1]) >= l.window {
+				delete(l.attempts, k)
+			}
+		}
+	}
 	kept := l.attempts[ip][:0]
 	for _, t := range l.attempts[ip] {
 		if now.Sub(t) < l.window {
@@ -73,6 +83,7 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("DELETE /api/admin/credentials/{id}", a.requireSession(a.handleDeleteCredential, store.RoleAdmin, true))
 
 	a.mux.HandleFunc("GET /api/admin/models", a.requireSession(a.handleListModels, store.RoleViewer, false))
+	a.mux.HandleFunc("PATCH /api/admin/models/bulk", a.requireSession(a.handleBulkModelChannels, store.RoleAdmin, true))
 	a.mux.HandleFunc("PATCH /api/admin/models/{id}", a.requireSession(a.handleUpdateModel, store.RoleAdmin, true))
 
 	a.mux.HandleFunc("GET /api/admin/combos", a.requireSession(a.handleListCombos, store.RoleViewer, false))
@@ -173,7 +184,7 @@ func (a *App) requireSession(next func(http.ResponseWriter, *http.Request), minR
 		}
 		if mutating {
 			token := r.Header.Get("X-CSRF-Token")
-			if token == "" || token != sess.CSRFToken {
+			if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(sess.CSRFToken)) != 1 {
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": "CSRF token tidak sah"})
 				return
 			}
@@ -183,43 +194,77 @@ func (a *App) requireSession(next func(http.ResponseWriter, *http.Request), minR
 }
 
 // setSessionCookie menulis cookie sesi (NFR-03).
-func (a *App) setSessionCookie(w http.ResponseWriter, token string, ttl time.Duration) {
+func (a *App) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, ttl time.Duration) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   a.cfg.CookieSecure,
+		Secure:   a.cookieSecure(r),
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(ttl.Seconds()),
 	})
 }
 
-func (a *App) clearSessionCookie(w http.ResponseWriter) {
+func (a *App) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: "", Path: "/", HttpOnly: true,
-		Secure: a.cfg.CookieSecure, SameSite: http.SameSiteStrictMode, MaxAge: -1,
+		Secure: a.cookieSecure(r), SameSite: http.SameSiteStrictMode, MaxAge: -1,
 	})
 }
+
+// cookieSecure: konfigurasi eksplisit, koneksi TLS langsung, atau HTTPS yang
+// dilaporkan proxy tepercaya (Caddy/cloudflared) lewat X-Forwarded-Proto.
+func (a *App) cookieSecure(r *http.Request) bool {
+	if a.cfg.CookieSecure || r.TLS != nil {
+		return true
+	}
+	return apigate.FromTrustedProxy(r) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+// setupDone true bila wizard first-run sudah pernah selesai. Penanda
+// disimpan permanen — menghapus/menurunkan super_admin tidak membuka ulang
+// /api/setup untuk siapa pun.
+func (a *App) setupDone() (bool, error) {
+	if v, _ := a.st.GetSetting(store.SetupDoneKey); v == "1" {
+		return true, nil
+	}
+	n, err := a.st.CountSuperAdmins()
+	if err != nil {
+		return false, err
+	}
+	if n > 0 {
+		_ = a.st.SetSetting(store.SetupDoneKey, "1") // instalasi lama: tandai
+		return true, nil
+	}
+	return false, nil
+}
+
+// dummyHash dipakai saat email tidak terdaftar agar waktu respons login
+// setara dengan password salah (cegah enumerasi email lewat timing).
+var dummyHash = sync.OnceValue(func() string {
+	h, _ := crypto.HashPassword("dummy-Password-untuk-timing-1")
+	return h
+})
 
 // ---- setup wizard ----
 
 func (a *App) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
-	n, err := a.st.CountSuperAdmins()
+	done, err := a.setupDone()
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"needs_setup": n == 0, "version": Version})
+	writeJSON(w, http.StatusOK, map[string]any{"needs_setup": !done, "version": Version})
 }
 
 func (a *App) handleSetup(w http.ResponseWriter, r *http.Request) {
-	n, err := a.st.CountSuperAdmins()
+	done, err := a.setupDone()
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	if n > 0 {
+	if done {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "setup sudah dilakukan"})
 		return
 	}
@@ -245,12 +290,13 @@ func (a *App) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+	_ = a.st.SetSetting(store.SetupDoneKey, "1")
 	token, csrf, err := a.st.CreateSession(u.ID, a.cfg.SessionTTL)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	a.setSessionCookie(w, token, a.cfg.SessionTTL)
+	a.setSessionCookie(w, r, token, a.cfg.SessionTTL)
 	_ = a.st.Audit(u.ID, "setup.completed", "users/"+fmtInt(u.ID), nil, map[string]string{"email": u.Email})
 	writeJSON(w, http.StatusOK, map[string]any{"user": u.Public(), "csrf": csrf})
 }
@@ -273,6 +319,9 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, err := a.st.GetUserByEmail(strings.TrimSpace(strings.ToLower(req.Email)))
+	if err != nil {
+		crypto.VerifyPassword(dummyHash(), req.Password) // samakan waktu respons
+	}
 	if err != nil || !crypto.VerifyPassword(u.PasswordHash, req.Password) {
 		// respons seragam agar tidak membocorkan keberadaan email
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "email atau password salah"})
@@ -287,7 +336,7 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	a.setSessionCookie(w, token, a.cfg.SessionTTL)
+	a.setSessionCookie(w, r, token, a.cfg.SessionTTL)
 	_ = a.st.Audit(u.ID, "auth.login", "users/"+fmtInt(u.ID), nil, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"user": u.Public(), "csrf": csrf})
 }
@@ -300,7 +349,7 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if ai != nil {
 		_ = a.st.Audit(ai.user.ID, "auth.logout", "users/"+fmtInt(ai.user.ID), nil, nil)
 	}
-	a.clearSessionCookie(w)
+	a.clearSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "true"})
 }
 

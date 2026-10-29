@@ -97,6 +97,13 @@ func TestRollbackViaPathUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	oldRoot := applyRootDir
+	applyRootDir = filepath.Join(tmp, "apply-root")
+	t.Cleanup(func() { applyRootDir = oldRoot })
+	if err := os.MkdirAll(applyRootDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	app, _, _ := appTestEnv(t)
 	// tanpa backup → 400
 	w := httptest.NewRecorder()
@@ -108,20 +115,18 @@ func TestRollbackViaPathUnit(t *testing.T) {
 	if err := os.WriteFile(backupBinPath(), []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(applyResultPath(), []byte(`{"ok":true}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	w = httptest.NewRecorder()
 	app.handleSystemUpdateRollback(w, httptest.NewRequest("POST", "/api/admin/system/update/rollback", nil))
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("kode %d: %s", w.Code, w.Body.String())
 	}
 	b, err := os.ReadFile(applyRequestPath())
-	if err != nil || strings.TrimSpace(string(b)) != "rollback" {
-		t.Fatalf("isi permintaan = %q, %v", b, err)
+	rid := lastApplyRequest()
+	if err != nil || rid == "" || strings.TrimSpace(string(b)) != "rollback "+rid {
+		t.Fatalf("isi permintaan = %q (id %q), %v", b, rid, err)
 	}
-	if readApplyResult() != nil {
-		t.Fatal("hasil apply lama harus dibuang sebelum memicu helper")
+	if !strings.Contains(w.Body.String(), `"request":"`+rid+`"`) {
+		t.Fatalf("respons tanpa id permintaan: %s", w.Body.String())
 	}
 }
 

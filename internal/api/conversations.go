@@ -149,16 +149,7 @@ func (a *App) adminChatTarget(w http.ResponseWriter, r *http.Request) (*store.Us
 	if !ok {
 		return nil, false
 	}
-	target, err := a.st.GetUser(id)
-	if err != nil {
-		writeJSON(w, 404, map[string]string{"error": "user tidak ada"})
-		return nil, false
-	}
-	if !canManageUser(authFrom(r).user, target) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "tidak boleh melihat chat user ini"})
-		return nil, false
-	}
-	return target, true
+	return a.manageable(w, r, id)
 }
 
 func (a *App) handleAdminUserConversations(w http.ResponseWriter, r *http.Request) {

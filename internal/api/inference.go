@@ -16,8 +16,23 @@ import (
 
 // ===== Resolver: nama request → langkah combo (FR-2.1) =====
 
-// storeResolver implementasi router.Resolver di atas store.
-type storeResolver struct{ st *store.Store }
+// storeResolver implementasi router.Resolver di atas store, untuk satu
+// kanal: "api" (/v1, default) atau "chat" (chat dashboard).
+type storeResolver struct {
+	st      *store.Store
+	channel string
+}
+
+// usable true bila model aktif, provider aktif, dan kanal ini dinyalakan.
+func (r storeResolver) usable(m *store.Model) bool {
+	if !m.Enabled || !m.ProviderEnabled {
+		return false
+	}
+	if r.channel == "chat" {
+		return m.ChatEnabled
+	}
+	return m.APIEnabled
+}
 
 // Resolve memetakan nama ke 1..n langkah: combo → banyak langkah;
 // alias/public_id → satu langkah.
@@ -29,7 +44,7 @@ func (r storeResolver) Resolve(name string) ([]router.Step, error) {
 			if err != nil {
 				continue
 			}
-			if !m.Enabled || !m.ProviderEnabled {
+			if !r.usable(m) {
 				continue
 			}
 			steps = append(steps, modelToStep(m, cs.TimeoutMs))
@@ -43,7 +58,10 @@ func (r storeResolver) Resolve(name string) ([]router.Step, error) {
 	if err != nil {
 		return nil, fmt.Errorf("model/combo %q tidak ditemukan", name)
 	}
-	if !m.Enabled || !m.ProviderEnabled {
+	if !r.usable(m) {
+		if m.Enabled && m.ProviderEnabled {
+			return nil, fmt.Errorf("model %q tidak tersedia di %s", name, r.channelLabel())
+		}
 		return nil, fmt.Errorf("model %q sedang nonaktif", name)
 	}
 	return []router.Step{modelToStep(m, 0)}, nil
@@ -321,4 +339,11 @@ func (g *localGate) acquire(modelID int64, s store.CredentialSettings, ctx conte
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+func (r storeResolver) channelLabel() string {
+	if r.channel == "chat" {
+		return "chat"
+	}
+	return "API"
 }

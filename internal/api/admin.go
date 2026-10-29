@@ -517,13 +517,15 @@ func (a *App) handleUpdateModel(w http.ResponseWriter, r *http.Request) {
 		ContextWindow *int            `json:"context_window"`
 		Capabilities  *store.ModelCap `json:"capabilities"`
 		Enabled       *bool           `json:"enabled"`
+		ChatEnabled   *bool           `json:"chat_enabled"`
+		APIEnabled    *bool           `json:"api_enabled"`
 	}
 	if err := decodeBody(w, r, &req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "body tidak sah"})
 		return
 	}
 	if err := a.st.UpdateModelFields(id, req.Alias, req.DisplayName, req.PriceInPer1M, req.PriceOutPer1M,
-		req.ContextWindow, req.Capabilities, req.Enabled); err != nil {
+		req.ContextWindow, req.Capabilities, req.Enabled, req.ChatEnabled, req.APIEnabled); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
@@ -533,6 +535,27 @@ func (a *App) handleUpdateModel(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---- Combo ----
+
+// handleBulkModelChannels PATCH /api/admin/models/bulk — centang/kosongkan
+// kanal chat/api untuk banyak model sekaligus.
+func (a *App) handleBulkModelChannels(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs         []int64 `json:"ids"`
+		ChatEnabled *bool   `json:"chat_enabled"`
+		APIEnabled  *bool   `json:"api_enabled"`
+	}
+	if err := decodeBody(w, r, &req); err != nil || len(req.IDs) == 0 || len(req.IDs) > 5000 ||
+		(req.ChatEnabled == nil && req.APIEnabled == nil) {
+		writeJSON(w, 400, map[string]string{"error": "body tidak sah: perlu ids dan chat_enabled/api_enabled"})
+		return
+	}
+	if err := a.st.SetModelChannels(req.IDs, req.ChatEnabled, req.APIEnabled); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	a.audit(r, "model.channels.bulk", "models", nil, req)
+	writeJSON(w, 200, map[string]any{"ok": true, "count": len(req.IDs)})
+}
 
 func (a *App) handleListCombos(w http.ResponseWriter, r *http.Request) {
 	combos, err := a.st.ListCombos()
@@ -624,6 +647,64 @@ func canManageUser(actor *store.User, target *store.User) bool {
 	return target.Role == store.RoleMember || target.Role == store.RoleViewer
 }
 
+// manageable memuat user target dan memastikan aktor boleh mengelolanya
+// (canManageUser). Menulis 404/403 dan mengembalikan false bila tidak.
+func (a *App) manageable(w http.ResponseWriter, r *http.Request, userID int64) (*store.User, bool) {
+	target, err := a.st.GetUser(userID)
+	if err != nil {
+		writeJSON(w, 404, map[string]string{"error": "user tidak ada"})
+		return nil, false
+	}
+	if !canManageUser(authFrom(r).user, target) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "tidak boleh mengelola user ini"})
+		return nil, false
+	}
+	return target, true
+}
+
+// manageableKey memuat API key dan memastikan aktor boleh mengelola pemiliknya.
+func (a *App) manageableKey(w http.ResponseWriter, r *http.Request, keyID int64) (*store.APIKey, bool) {
+	k, err := a.st.GetAPIKey(keyID)
+	if err != nil {
+		writeJSON(w, 404, map[string]string{"error": "key tidak ada"})
+		return nil, false
+	}
+	if _, ok := a.manageable(w, r, k.UserID); !ok {
+		return nil, false
+	}
+	return k, true
+}
+
+// invalidateUserKeys membuang cache gate untuk semua key user agar
+// penonaktifan/penghapusan user berlaku seketika (bukan setelah TTL cache).
+func (a *App) invalidateUserKeys(userID int64) {
+	keys, err := a.st.ListKeysByUser(userID)
+	if err != nil {
+		return
+	}
+	for _, k := range keys {
+		a.gate.InvalidateKey(k.KeyHash)
+	}
+}
+
+// lastSuperAdminGuard menolak perubahan yang menyisakan nol super_admin aktif.
+func (a *App) lastSuperAdminGuard(w http.ResponseWriter, target *store.User) bool {
+	if target.Role != store.RoleSuperAdmin || target.Status != "active" {
+		return true
+	}
+	n, err := a.st.CountActiveSuperAdmins()
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return false
+	}
+	if n <= 1 {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "tidak bisa menurunkan, menonaktifkan, atau menghapus super_admin aktif terakhir"})
+		return false
+	}
+	return true
+}
+
 func (a *App) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	ai := authFrom(r)
 	var req struct {
@@ -696,9 +777,27 @@ func (a *App) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	demote := req.Role != nil && *req.Role != target.Role
+	disable := req.Status != nil && *req.Status != "active"
+	if (demote || disable) && !a.lastSuperAdminGuard(w, target) {
+		return
+	}
 	if err := a.st.UpdateUserFields(id, req.Email, req.Role, req.Status, req.Password, req.DefaultComboID); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
+	}
+	if req.Password != nil {
+		// cabut sesi lain user ini; sesi aktor sendiri dipertahankan
+		except := ""
+		if id == ai.user.ID {
+			if c, err := r.Cookie(sessionCookie); err == nil {
+				except = c.Value
+			}
+		}
+		_ = a.st.DeleteUserSessions(id, except)
+	}
+	if req.Status != nil || req.Role != nil {
+		a.invalidateUserKeys(id)
 	}
 	u, _ := a.st.GetUser(id)
 	a.audit(r, "user.update", "users/"+fmtInt(id), nil, u.Public())
@@ -715,6 +814,15 @@ func (a *App) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "tidak bisa menghapus diri sendiri"})
 		return
 	}
+	target, err := a.st.GetUser(id)
+	if err != nil {
+		writeJSON(w, 404, map[string]string{"error": "user tidak ada"})
+		return
+	}
+	if !a.lastSuperAdminGuard(w, target) {
+		return
+	}
+	a.invalidateUserKeys(id)
 	if err := a.st.DeleteUser(id); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
@@ -748,9 +856,8 @@ func (a *App) handleUserUsageDetail(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	u, err := a.st.GetUser(id)
-	if err != nil {
-		writeJSON(w, 404, map[string]string{"error": "user tidak ada"})
+	u, ok := a.manageable(w, r, id)
+	if !ok {
 		return
 	}
 	days := 30
@@ -797,6 +904,9 @@ func (a *App) handleListKeys(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if _, ok := a.manageable(w, r, id); !ok {
+		return
+	}
 	keys, err := a.st.ListKeysByUser(id)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
@@ -812,6 +922,9 @@ func (a *App) handleListKeys(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
+		return
+	}
+	if _, ok := a.manageable(w, r, id); !ok {
 		return
 	}
 	var req struct {
@@ -856,6 +969,9 @@ func (a *App) handleRevealKey(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if _, ok := a.manageableKey(w, r, id); !ok {
+		return
+	}
 	plain, err := a.st.GetKeySecret(id)
 	if err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{
@@ -871,9 +987,8 @@ func (a *App) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	k, err := a.st.GetAPIKey(id)
-	if err != nil {
-		writeJSON(w, 404, map[string]string{"error": "key tidak ada"})
+	k, ok := a.manageableKey(w, r, id)
+	if !ok {
 		return
 	}
 	if err := a.st.DeleteAPIKey(id); err != nil {
@@ -898,6 +1013,14 @@ func (a *App) handlePutKeyQuota(w http.ResponseWriter, r *http.Request) {
 func (a *App) putQuota(w http.ResponseWriter, r *http.Request, scope string) {
 	id, ok := pathID(w, r)
 	if !ok {
+		return
+	}
+	// RBAC: admin tidak boleh mengubah kuota dirinya sendiri / admin lain
+	if scope == "key" {
+		if _, ok := a.manageableKey(w, r, id); !ok {
+			return
+		}
+	} else if _, ok := a.manageable(w, r, id); !ok {
 		return
 	}
 	var req struct {
@@ -1027,10 +1150,25 @@ func (a *App) handleListAudit(w http.ResponseWriter, r *http.Request) {
 
 // ---- Settings ----
 
+// settingKeys pengaturan yang boleh diubah lewat API; nilai rahasia tidak
+// pernah dikembalikan GET maupun dicatat ke audit log.
+var settingKeys = map[string]bool{
+	"notification_telegram_token": true, "notification_chat_id": true, "public_url": true,
+	"google_oauth_client_id": true, "google_oauth_client_secret": true,
+}
+
+func isSecretSetting(k string) bool {
+	return strings.Contains(k, "secret") || strings.Contains(k, "token")
+}
+
 func (a *App) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	out := map[string]string{}
-	for _, key := range []string{"notification_telegram_token", "notification_chat_id", "public_url"} {
+	for key := range settingKeys {
 		v, _ := a.st.GetSetting(key)
+		if isSecretSetting(key) {
+			out[key+"_set"] = boolStr(v != "")
+			continue
+		}
 		out[key] = v
 	}
 	out["log_prompts"] = boolStr(a.cfg.LogPrompts)
@@ -1044,16 +1182,28 @@ func (a *App) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "body tidak sah"})
 		return
 	}
+	for k := range req {
+		if !settingKeys[k] {
+			writeJSON(w, 400, map[string]string{"error": "pengaturan tidak dikenal: " + k})
+			return
+		}
+	}
+	logged := map[string]string{}
 	for k, v := range req {
-		if strings.Contains(k, "secret") || strings.Contains(k, "token") {
-			// nilai sensitif: tidak boleh dikembalikan via GET, disimpan saja
+		if isSecretSetting(k) {
+			if v == "" {
+				continue // kosong = pertahankan nilai lama (GET tidak mengembalikannya)
+			}
+			logged[k] = "[diubah]"
+		} else {
+			logged[k] = v
 		}
 		if err := a.st.SetSetting(k, v); err != nil {
 			writeJSON(w, 500, map[string]string{"error": err.Error()})
 			return
 		}
 	}
-	a.audit(r, "settings.update", "settings", nil, req)
+	a.audit(r, "settings.update", "settings", nil, logged)
 	writeJSON(w, 200, map[string]string{"ok": "true"})
 }
 

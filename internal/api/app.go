@@ -25,7 +25,8 @@ type App struct {
 	client    *provider.Client
 	breakers  *router.Breakers
 	rec       *usage.Recorder
-	resolver  router.Resolver
+	resolver  router.Resolver // kanal API (/v1)
+	chatRes   router.Resolver // kanal chat dashboard
 	localGate *localGate
 	mux       *http.ServeMux
 }
@@ -37,6 +38,10 @@ func NewApp(cfg *config.Config) (*App, error) {
 		return nil, err
 	}
 	store.SetMasterKey(cfg.MasterKey)
+	if err := apigate.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		st.Close()
+		return nil, err
+	}
 	a := &App{
 		cfg:       cfg,
 		st:        st,
@@ -44,7 +49,8 @@ func NewApp(cfg *config.Config) (*App, error) {
 		client:    provider.NewClient(),
 		breakers:  router.NewBreakers(),
 		rec:       usage.NewRecorder(st, 4096),
-		resolver:  storeResolver{st: st},
+		resolver:  storeResolver{st: st, channel: "api"},
+		chatRes:   storeResolver{st: st, channel: "chat"},
 		localGate: newLocalGate(),
 		mux:       http.NewServeMux(),
 	}

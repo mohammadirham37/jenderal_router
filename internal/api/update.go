@@ -409,6 +409,7 @@ func (a *App) updateStatusView(r *http.Request) map[string]any {
 	if res := readApplyResult(); res != nil {
 		st["apply_result"] = res
 	}
+	st["apply_requested"] = lastApplyRequest()
 	if lu := readLastUpdate(); lu.Time != "" {
 		st["last_update"] = lu
 	}
@@ -630,8 +631,7 @@ func (a *App) handleSystemUpdate(w http.ResponseWriter, r *http.Request) {
 			// tanpa sudo: tulis file permintaan — unit jenderalrouter-apply.path
 			// (root) yang menjalankan pemasangan; service lalu di-restart
 			job.setPhase("memasang & me-restart service (unit path systemd)")
-			_ = os.Remove(applyResultPath())
-			if err := os.WriteFile(applyRequestPath(), []byte(time.Now().UTC().Format(time.RFC3339Nano)), 0o644); err != nil {
+			if _, err := writeApplyRequest("install"); err != nil {
 				fail("gagal menulis permintaan apply: " + err.Error())
 				return
 			}
@@ -643,7 +643,10 @@ func (a *App) handleSystemUpdate(w http.ResponseWriter, r *http.Request) {
 				Time: time.Now().UTC().Format(time.RFC3339), From: fromVersion, To: newHead, Commits: behind,
 			})
 			job.setPhase("memasang & me-restart service (helper sudo)")
-			_ = os.Remove(applyResultPath())
+			if _, err := writeApplyRequest("install"); err != nil {
+				fail("gagal menulis permintaan apply: " + err.Error())
+				return
+			}
 			applyCtx, applyCancel := context.WithTimeout(context.Background(), 150*time.Second)
 			defer applyCancel()
 			if err := exec.CommandContext(applyCtx, "sudo", "-n", applyUpdateScript, "install").Run(); err != nil {

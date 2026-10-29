@@ -214,7 +214,7 @@ func (a *App) handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		renderOAuthError(w, "gagal membuat sesi.")
 		return
 	}
-	a.setSessionCookie(w, token, a.cfg.SessionTTL)
+	a.setSessionCookie(w, r, token, a.cfg.SessionTTL)
 	_ = a.st.Audit(u.ID, "auth.login.google", "users/"+fmtInt(u.ID), nil, map[string]string{"email": email})
 	http.Redirect(w, r, "/chat", http.StatusFound)
 }

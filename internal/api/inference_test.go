@@ -427,7 +427,7 @@ func TestAliasModelE2E(t *testing.T) {
 		t.Fatalf("list model: %v", err)
 	}
 	alias := "cepat"
-	if err := st.UpdateModelFields(models[0].ID, &alias, nil, nil, nil, nil, nil, nil); err != nil {
+	if err := st.UpdateModelFields(models[0].ID, &alias, nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -523,4 +523,52 @@ func modelIDByPrefix(t *testing.T, st *store.Store, providerID int64) int64 {
 	}
 	t.Fatal("model tidak ditemukan")
 	return 0
+}
+
+// Kanal model: dimatikan untuk API → hilang dari /v1/models dan ditolak di
+// /v1; tetap tersedia di chat dashboard (dan sebaliknya).
+func TestModelChannelsChatVsAPI(t *testing.T) {
+	app, st, key := appTestEnv(t)
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}`)
+	}))
+	defer mock.Close()
+	seedMockProvider(t, st, "Mock", "mk", mock.URL)
+	m, err := st.FindModelByPublicOrAlias("mk/mock-model")
+	if err != nil || !m.ChatEnabled || !m.APIEnabled {
+		t.Fatalf("default kanal harus aktif: %+v %v", m, err)
+	}
+	cookie, csrf := loginAs(app, t, "admin@test", "Sandi-Kuat-123")
+	h := app.Handler()
+
+	// matikan API lewat bulk
+	w := dashReq(app, "PATCH", "/api/admin/models/bulk", map[string]any{"ids": []int64{m.ID}, "api_enabled": false}, cookie, csrf)
+	if w.Code != 200 {
+		t.Fatalf("bulk = %d %s", w.Code, w.Body.String())
+	}
+	if w := doJSON(t, h, "GET", "/v1/models", key, nil); strings.Contains(w.Body.String(), "mk/mock-model") {
+		t.Fatalf("model API-off masih di /v1/models: %s", w.Body.String())
+	}
+	if w := doJSON(t, h, "POST", "/v1/chat/completions", key, inferBody("mk/mock-model", false)); w.Code != http.StatusNotFound {
+		t.Fatalf("/v1 harus menolak: %d %s", w.Code, w.Body.String())
+	}
+	if w := dashReq(app, "GET", "/api/me/models", nil, cookie, ""); !strings.Contains(w.Body.String(), "mk/mock-model") {
+		t.Fatalf("chat harus tetap punya model: %s", w.Body.String())
+	}
+
+	// matikan chat, nyalakan API lagi (per model)
+	w = dashReq(app, "PATCH", "/api/admin/models/"+fmtInt(m.ID), map[string]any{"chat_enabled": false, "api_enabled": true}, cookie, csrf)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"chat_enabled":false`) {
+		t.Fatalf("patch = %d %s", w.Code, w.Body.String())
+	}
+	if w := dashReq(app, "GET", "/api/me/models", nil, cookie, ""); strings.Contains(w.Body.String(), "mk/mock-model") {
+		t.Fatalf("model chat-off masih di daftar chat: %s", w.Body.String())
+	}
+	w = dashReq(app, "POST", "/api/me/chat", map[string]any{"model": "mk/mock-model", "messages": []map[string]string{{"role": "user", "content": "hai"}}}, cookie, csrf)
+	if w.Code == 200 || !strings.Contains(w.Body.String(), "tidak tersedia di chat") {
+		t.Fatalf("chat harus menolak: %d %s", w.Code, w.Body.String())
+	}
+	if w := doJSON(t, h, "POST", "/v1/chat/completions", key, inferBody("mk/mock-model", false)); w.Code != 200 {
+		t.Fatalf("/v1 setelah API dinyalakan = %d %s", w.Code, w.Body.String())
+	}
 }

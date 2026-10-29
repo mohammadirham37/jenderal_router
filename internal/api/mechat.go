@@ -32,10 +32,16 @@ func (a *App) handleMeModels(w http.ResponseWriter, r *http.Request) {
 	}
 	entries := []entry{}
 	for _, m := range models {
+		if !m.ChatEnabled {
+			continue
+		}
 		entries = append(entries, entry{ID: modelDisplayID(m), Kind: "model", Owner: m.ProviderName, Local: m.ProviderType == "llamastash"})
 	}
 	if combos, err := a.st.ListCombos(); err == nil {
 		for _, c := range combos {
+			if _, err := a.chatRes.Resolve(c.Name); err != nil {
+				continue // tidak punya langkah yang tersedia di chat
+			}
 			entries = append(entries, entry{ID: c.Name, Kind: "combo", Owner: "combo"})
 		}
 	}
@@ -138,9 +144,9 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 429, map[string]string{"error": qs.Reason})
 		return
 	}
-	steps, err := a.resolver.Resolve(internal.Model)
+	steps, err := a.chatRes.Resolve(internal.Model)
 	if err != nil {
-		writeJSON(w, 404, map[string]string{"error": "model tidak ditemukan: " + internal.Model})
+		writeJSON(w, 404, map[string]string{"error": err.Error()})
 		return
 	}
 

@@ -191,11 +191,37 @@ func TestCacheInvalidation(t *testing.T) {
 }
 
 func TestClientIPForwarded(t *testing.T) {
-	r := httptest.NewRequest("POST", "/", nil)
-	r.RemoteAddr = "10.0.0.1:1234"
-	r.Header.Set("X-Forwarded-For", "198.51.100.7, 10.0.0.2")
-	if got := ClientIP(r); got != "198.51.100.7" {
-		t.Errorf("ClientIP = %s", got)
+	t.Cleanup(func() { _ = SetTrustedProxies(nil) })
+	req := func(remote string, xff ...string) *http.Request {
+		r := httptest.NewRequest("POST", "/", nil)
+		r.RemoteAddr = remote
+		for _, v := range xff {
+			r.Header.Add("X-Forwarded-For", v)
+		}
+		return r
+	}
+	// klien langsung (bukan proxy tepercaya): XFF palsu diabaikan
+	if got := ClientIP(req("203.0.113.9:1234", "1.2.3.4")); got != "203.0.113.9" {
+		t.Errorf("XFF dari klien tak tepercaya dipakai: %s", got)
+	}
+	// lewat proxy lokal (Caddy/cloudflared): entri paling kanan = klien asli,
+	// entri kiri yang dipalsukan penyerang diabaikan
+	if got := ClientIP(req("127.0.0.1:5000", "6.6.6.6, 198.51.100.7")); got != "198.51.100.7" {
+		t.Errorf("ClientIP via loopback = %s", got)
+	}
+	// header XFF berulang digabung
+	if got := ClientIP(req("127.0.0.1:5000", "6.6.6.6", "198.51.100.8")); got != "198.51.100.8" {
+		t.Errorf("XFF berulang = %s", got)
+	}
+	// proxy berlapis tepercaya (JR_TRUSTED_PROXIES) dilewati dari kanan
+	if err := SetTrustedProxies([]string{"10.0.0.0/8"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := ClientIP(req("10.0.0.1:1234", "198.51.100.7, 10.0.0.2")); got != "198.51.100.7" {
+		t.Errorf("ClientIP proxy berlapis = %s", got)
+	}
+	if err := SetTrustedProxies([]string{"bukan-cidr"}); err == nil {
+		t.Error("CIDR tidak sah harus error")
 	}
 }
 

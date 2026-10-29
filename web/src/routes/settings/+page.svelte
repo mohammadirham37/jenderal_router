@@ -6,7 +6,7 @@
 	import { t, toast } from '#lib/stores.svelte.js';
 
 	// ---- notifikasi ----
-	let tgToken = $state(''); let tgChat = $state('');
+	let tgToken = $state(''); let tgChat = $state(''); let tgTokenSet = $state(false);
 	async function saveSettings() {
 		try {
 			await api.put('/api/admin/settings', { notification_telegram_token: tgToken, notification_chat_id: tgChat });
@@ -94,7 +94,7 @@ sudo cloudflared service install`;
 
 	$effect(() => {
 		(async () => {
-			try { const s = await api.get('/api/admin/settings'); tgToken = s.settings.notification_telegram_token || ''; tgChat = s.settings.notification_chat_id || ''; } catch { /* */ }
+			try { const s = await api.get('/api/admin/settings'); tgTokenSet = s.settings.notification_telegram_token_set === 'true'; tgChat = s.settings.notification_chat_id || ''; } catch { /* */ }
 		})();
 	});
 
@@ -114,7 +114,7 @@ sudo cloudflared service install`;
 <div class="card">
 	<h2>Notifikasi (v1.1)</h2>
 	<label for="f-tg-token">Telegram bot token</label>
-	<input id="f-tg-token" type="password" bind:value={tgToken} placeholder="123456:ABC…" />
+	<input id="f-tg-token" type="password" bind:value={tgToken} placeholder={tgTokenSet ? 'tersimpan — isi untuk mengganti' : '123456:ABC…'} autocomplete="off" />
 	<label for="f-tg-chat">Telegram chat id</label>
 	<input id="f-tg-chat" bind:value={tgChat} />
 	<div class="modal-actions" style="justify-content:flex-start;margin-top:12px">

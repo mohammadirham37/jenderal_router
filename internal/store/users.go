@@ -35,8 +35,17 @@ func (s *Store) CreateUser(email, password, role string) (*User, error) {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
+	if role == RoleSuperAdmin {
+		// begitu ada super_admin, wizard /api/setup tertutup permanen
+		if err := s.SetSetting(SetupDoneKey, "1"); err != nil {
+			return nil, err
+		}
+	}
 	return s.GetUser(id)
 }
+
+// SetupDoneKey penanda permanen bahwa wizard first-run sudah selesai.
+const SetupDoneKey = "setup_completed"
 
 // GetUser mengambil user berdasarkan id.
 func (s *Store) GetUser(id int64) (*User, error) {
@@ -298,4 +307,24 @@ type PublicUser struct {
 func (u *User) Public() *PublicUser {
 	return &PublicUser{ID: u.ID, Email: u.Email, Role: u.Role, Status: u.Status,
 		DefaultComboID: u.DefaultComboID, CreatedAt: u.CreatedAt}
+}
+
+// CountActiveSuperAdmins jumlah super_admin berstatus aktif — penjaga agar
+// super_admin terakhir tidak bisa diturunkan/dinonaktifkan/dihapus.
+func (s *Store) CountActiveSuperAdmins() (int, error) {
+	var n int
+	err := s.DB.QueryRow(`SELECT COUNT(*) FROM users WHERE role = ? AND status = 'active'`, RoleSuperAdmin).Scan(&n)
+	return n, err
+}
+
+// DeleteUserSessions mencabut semua sesi user (mis. setelah ganti password),
+// kecuali sesi dengan token exceptToken (sesi aktor sendiri) bila diisi.
+func (s *Store) DeleteUserSessions(userID int64, exceptToken string) error {
+	if exceptToken == "" {
+		_, err := s.DB.Exec(`DELETE FROM sessions WHERE user_id = ?`, userID)
+		return err
+	}
+	_, err := s.DB.Exec(`DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?`,
+		userID, crypto.HashToken(exceptToken))
+	return err
 }

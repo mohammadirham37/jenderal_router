@@ -34,6 +34,9 @@ func (a *App) modelsInference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, m := range models {
+		if !m.APIEnabled {
+			continue
+		}
 		// allowlist key menerima public_id maupun alias
 		if !ac.ModelAllowed(m.PublicID) && (m.Alias == "" || !ac.ModelAllowed(m.Alias)) {
 			continue
@@ -42,6 +45,9 @@ func (a *App) modelsInference(w http.ResponseWriter, r *http.Request) {
 	}
 	if combos, err := a.st.ListCombos(); err == nil {
 		for _, c := range combos {
+			if _, err := a.resolver.Resolve(c.Name); err != nil {
+				continue // tidak punya langkah yang tersedia di API
+			}
 			if ac.ModelAllowed(c.Name) {
 				data = append(data, modelEntry{ID: c.Name, Object: "model", Created: now, OwnedBy: "combo"})
 			}

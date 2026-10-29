@@ -47,7 +47,7 @@
 		const j = upd?.job;
 		if (!j?.done) return;
 		if (!j.ok) { toast('Pembaruan gagal: ' + (j.error || 'lihat log'), 'err'); return; }
-		if (j.restarted) { await waitHelper('install'); return; }
+		if (j.restarted) { await waitHelper('install', upd?.apply_requested || ''); return; }
 		if (j.staged) toast('Build selesai — binary siap dipasang', 'ok');
 		else toast('Sudah versi terbaru', 'ok');
 		await load('0');
@@ -55,7 +55,7 @@
 
 	// tunggu helper root selesai (service sempat mati saat restart) lalu
 	// tampilkan hasilnya: sukses, atau gagal + rollback otomatis
-	async function waitHelper(action: 'install' | 'rollback') {
+	async function waitHelper(action: 'install' | 'rollback', rid: string) {
 		applying = action;
 		toast(action === 'install' ? 'Memasang versi baru & me-restart service…' : 'Mengembalikan versi sebelumnya…', 'info');
 		let res: any = null;
@@ -64,7 +64,9 @@
 			try {
 				const st = await api.get('/api/admin/system/update/status', { noRedirect: true });
 				upd = st;
-				if (st.apply_result) res = st.apply_result;
+				// hasil helper dicocokkan lewat id permintaan (file hasil milik root)
+				const want = rid || st.apply_requested;
+				if (st.apply_result && want && st.apply_result.request === want) res = st.apply_result;
 			} catch { /* service sedang restart */ }
 		}
 		applying = '';
@@ -89,13 +91,15 @@
 
 	async function trigger(action: 'install' | 'rollback') {
 		if (action === 'rollback' && !confirm('Kembalikan ke versi sebelumnya?\n\nService di-restart memakai binary backup dari pemasangan terakhir.')) return;
+		let rid = '';
 		try {
-			await api.post('/api/admin/system/update/' + (action === 'install' ? 'apply' : 'rollback'), {});
+			const r = await api.post('/api/admin/system/update/' + (action === 'install' ? 'apply' : 'rollback'), {});
+			rid = r?.request || '';
 		} catch (e: any) {
 			toast(e.message, 'err');
 			return;
 		}
-		await waitHelper(action);
+		await waitHelper(action, rid);
 	}
 
 	async function copy(text: string) {

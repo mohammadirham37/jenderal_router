@@ -32,6 +32,9 @@ type Config struct {
 	BackupHour    int // jam UTC/jam-lokal penyimpanan backup harian
 	ShmMode       bool
 	Environment   string // development|production
+	// TrustedProxies CIDR/IP proxy tambahan (selain loopback) yang header
+	// X-Forwarded-For-nya dipercaya, dari JR_TRUSTED_PROXIES (pisah koma).
+	TrustedProxies []string
 }
 
 // Load membaca env dan mengembalikan konfigurasi final.
@@ -50,6 +53,9 @@ func Load() (*Config, error) {
 	}
 	c.DatabaseURL = env("JR_DATABASE_URL", filepath.Join(c.DataDir, "jenderalrouter.db"))
 	c.RedisURL = env("JR_REDIS_URL", "")
+	if v := env("JR_TRUSTED_PROXIES", ""); v != "" {
+		c.TrustedProxies = strings.Split(v, ",")
+	}
 
 	if strings.HasPrefix(c.PublicURL, "https://") {
 		c.CookieSecure = true

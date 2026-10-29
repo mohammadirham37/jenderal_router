@@ -19,6 +19,8 @@ type Model struct {
 	ContextWindow int      `json:"context_window"`
 	Capabilities  ModelCap `json:"capabilities"`
 	Enabled       bool     `json:"enabled"`
+	ChatEnabled   bool     `json:"chat_enabled"` // tersedia di chat dashboard
+	APIEnabled    bool     `json:"api_enabled"`  // tersedia lewat API /v1
 	CreatedAt     string   `json:"created_at"`
 	// diisi saat join dengan provider (untuk UI & router)
 	ProviderName    string `json:"provider_name,omitempty"`
@@ -58,9 +60,9 @@ func (s *Store) GetModel(id int64) (*Model, error) {
 // scanModel helper baris model dengan join provider.
 func scanModel(scan func(dest ...any) error) (*Model, error) {
 	m := &Model{}
-	var enabled, caps string
+	var enabled, chat, api, caps string
 	err := scan(&m.ID, &m.ProviderID, &m.UpstreamName, &m.PublicID, &m.Alias, &m.DisplayName,
-		&m.PriceInPer1M, &m.PriceOutPer1M, &m.ContextWindow, &caps, &enabled, &m.CreatedAt,
+		&m.PriceInPer1M, &m.PriceOutPer1M, &m.ContextWindow, &caps, &enabled, &chat, &api, &m.CreatedAt,
 		&m.ProviderName, &m.ProviderType, &m.ProviderPrefix, &m.ProviderEnabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -69,12 +71,14 @@ func scanModel(scan func(dest ...any) error) (*Model, error) {
 		return nil, err
 	}
 	m.Enabled = enabled == "1"
+	m.ChatEnabled = chat == "1"
+	m.APIEnabled = api == "1"
 	_ = json.Unmarshal([]byte(caps), &m.Capabilities)
 	return m, nil
 }
 
 const modelJoinSelect = `SELECT m.id, m.provider_id, m.upstream_name, m.public_id, m.alias, m.display_name,
-	m.price_in_per_1m, m.price_out_per_1m, m.context_window, m.capabilities, m.enabled, m.created_at,
+	m.price_in_per_1m, m.price_out_per_1m, m.context_window, m.capabilities, m.enabled, m.chat_enabled, m.api_enabled, m.created_at,
 	p.name, p.type, p.prefix, p.enabled
 	FROM models m JOIN providers p ON p.id = m.provider_id`
 
@@ -122,7 +126,7 @@ func (s *Store) FindModelByPublicOrAlias(name string) (*Model, error) {
 }
 
 // UpdateModelFields memperbarui alias/harga/capabilities/enabled (FR-1.8).
-func (s *Store) UpdateModelFields(id int64, alias, displayName *string, priceIn, priceOut *float64, ctxWindow *int, cap *ModelCap, enabled *bool) error {
+func (s *Store) UpdateModelFields(id int64, alias, displayName *string, priceIn, priceOut *float64, ctxWindow *int, cap *ModelCap, enabled, chatEnabled, apiEnabled *bool) error {
 	m, err := s.GetModel(id)
 	if err != nil {
 		return err
@@ -148,10 +152,49 @@ func (s *Store) UpdateModelFields(id int64, alias, displayName *string, priceIn,
 	if enabled != nil {
 		m.Enabled = *enabled
 	}
+	if chatEnabled != nil {
+		m.ChatEnabled = *chatEnabled
+	}
+	if apiEnabled != nil {
+		m.APIEnabled = *apiEnabled
+	}
+	// mengaktifkan satu kanal ikut menyalakan saklar utama
+	if (chatEnabled != nil && *chatEnabled) || (apiEnabled != nil && *apiEnabled) {
+		m.Enabled = true
+	}
 	_, err = s.DB.Exec(`UPDATE models SET alias=?, display_name=?, price_in_per_1m=?, price_out_per_1m=?,
-		context_window=?, capabilities=?, enabled=? WHERE id=?`,
-		m.Alias, m.DisplayName, m.PriceInPer1M, m.PriceOutPer1M, m.ContextWindow, toJSON(m.Capabilities), boolInt(m.Enabled), id)
+		context_window=?, capabilities=?, enabled=?, chat_enabled=?, api_enabled=? WHERE id=?`,
+		m.Alias, m.DisplayName, m.PriceInPer1M, m.PriceOutPer1M, m.ContextWindow, toJSON(m.Capabilities),
+		boolInt(m.Enabled), boolInt(m.ChatEnabled), boolInt(m.APIEnabled), id)
 	return err
+}
+
+// SetModelChannels mengatur kanal chat/api banyak model sekaligus (nil =
+// tidak diubah). Menyalakan kanal ikut menyalakan saklar utama enabled.
+func (s *Store) SetModelChannels(ids []int64, chatEnabled, apiEnabled *bool) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, id := range ids {
+		if chatEnabled != nil {
+			if _, err := tx.Exec(`UPDATE models SET chat_enabled = ? WHERE id = ?`, boolInt(*chatEnabled), id); err != nil {
+				return err
+			}
+		}
+		if apiEnabled != nil {
+			if _, err := tx.Exec(`UPDATE models SET api_enabled = ? WHERE id = ?`, boolInt(*apiEnabled), id); err != nil {
+				return err
+			}
+		}
+		if (chatEnabled != nil && *chatEnabled) || (apiEnabled != nil && *apiEnabled) {
+			if _, err := tx.Exec(`UPDATE models SET enabled = 1 WHERE id = ?`, id); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
 }
 
 // UpsertModelSinkron menyisipkan/memperbarui model hasil sinkronisasi (FR-1.6).
