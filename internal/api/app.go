@@ -4,6 +4,7 @@ package api
 
 import (
 	"context"
+	"github.com/jenderal/jenderalrouter/internal/captcha"
 	"log/slog"
 	"net/http"
 	"time"
@@ -27,6 +28,7 @@ type App struct {
 	rec       *usage.Recorder
 	resolver  router.Resolver // kanal API (/v1)
 	chatRes   router.Resolver // kanal chat dashboard
+	captcha   *captcha.Store  // captcha login password
 	localGate *localGate
 	mux       *http.ServeMux
 }
@@ -54,6 +56,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 		rec:       usage.NewRecorder(st, 4096),
 		resolver:  storeResolver{st: st, channel: "api"},
 		chatRes:   storeResolver{st: st, channel: "chat"},
+		captcha:   captcha.NewStore(10000),
 		localGate: newLocalGate(),
 		mux:       http.NewServeMux(),
 	}

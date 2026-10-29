@@ -74,7 +74,7 @@ func TestLastSuperAdminAndSetupOneTime(t *testing.T) {
 	if _, err := st.DB.Exec(`DELETE FROM users WHERE role = ?`, store.RoleSuperAdmin); err != nil {
 		t.Fatal(err)
 	}
-	w := dashReq(app, "POST", "/api/setup", map[string]string{"email": "evil@x.id", "password": "Kuat-2026-Pass"}, "", "")
+	w := dashReq(app, "POST", "/api/setup", withCaptcha(app, map[string]string{"email": "evil@x.id", "password": "Kuat-2026-Pass"}), "", "")
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("setup ulang = %d, mau 403", w.Code)
 	}
@@ -127,12 +127,14 @@ func TestSettingsSecretsRedacted(t *testing.T) {
 	}
 }
 
-// Rate limit login tidak bisa dilewati dengan memalsukan X-Forwarded-For.
+// Rate limit IP tidak bisa dilewati dengan memalsukan X-Forwarded-For
+// (email berbeda tiap percobaan agar kunci per-akun tidak ikut berperan).
 func TestLoginRateLimitIgnoresSpoofedXFF(t *testing.T) {
 	app, _, _ := appTestEnv(t)
 	blocked := 0
-	for i := 0; i < 8; i++ {
-		r := dashReqWith(app, "POST", "/api/login", map[string]string{"email": "admin@test", "password": "salah"},
+	for i := 0; i < 14; i++ {
+		r := dashReqWith(app, "POST", "/api/login",
+			withCaptcha(app, map[string]string{"email": "u" + fmtInt(int64(i)) + "@x", "password": "salah"}),
 			map[string]string{"X-Forwarded-For": "203.0.113." + fmtInt(int64(i))})
 		if r.Code == http.StatusTooManyRequests {
 			blocked++
@@ -140,6 +142,68 @@ func TestLoginRateLimitIgnoresSpoofedXFF(t *testing.T) {
 	}
 	if blocked == 0 {
 		t.Fatal("XFF palsu melewati rate limit login")
+	}
+}
+
+// Captcha wajib: tanpa/salah captcha ditolak SEBELUM password diperiksa,
+// dan captcha tidak bisa dipakai ulang.
+func TestLoginRequiresCaptcha(t *testing.T) {
+	app, _, _ := appTestEnv(t)
+	body := map[string]string{"email": "admin@test", "password": "Sandi-Kuat-123"}
+	if w := dashReq(app, "POST", "/api/login", body, "", ""); w.Code != 400 || !strings.Contains(w.Body.String(), `"captcha":true`) {
+		t.Fatalf("tanpa captcha = %d %s", w.Code, w.Body.String())
+	}
+	bad := withCaptcha(app, map[string]string{"email": "admin@test", "password": "Sandi-Kuat-123"})
+	bad["captcha"] = "XXXXX"
+	if w := dashReq(app, "POST", "/api/login", bad, "", ""); w.Code != 400 {
+		t.Fatalf("captcha salah = %d", w.Code)
+	}
+	ok := withCaptcha(app, map[string]string{"email": "admin@test", "password": "Sandi-Kuat-123"})
+	if w := dashReq(app, "POST", "/api/login", ok, "", ""); w.Code != 200 {
+		t.Fatalf("captcha benar = %d %s", w.Code, w.Body.String())
+	}
+	if w := dashReq(app, "POST", "/api/login", ok, "", ""); w.Code != 400 {
+		t.Fatalf("captcha dipakai ulang = %d", w.Code)
+	}
+	// respons captcha: PNG data URL, tanpa jawaban
+	w := dashReq(app, "GET", "/api/captcha", nil, "", "")
+	if !strings.Contains(w.Body.String(), `"image":"data:image/png;base64,`) || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("captcha = %s", w.Body.String())
+	}
+}
+
+// Akun dikunci setelah 5 kegagalan (dari IP mana pun), login benar pun
+// ditolak sampai jendela lewat; akun lain tidak terdampak; tercatat di audit.
+func TestAccountLockout(t *testing.T) {
+	app, _, _ := appTestEnv(t)
+	for i := 0; i < 5; i++ {
+		w := dashReqWith(app, "POST", "/api/login",
+			withCaptcha(app, map[string]string{"email": "dev@test", "password": "salah-" + fmtInt(int64(i))}),
+			nil)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("percobaan %d = %d", i, w.Code)
+		}
+		loginIPFails.clear() // simulasikan IP berbeda-beda (botnet)
+	}
+	w := dashReq(app, "POST", "/api/login", withCaptcha(app, map[string]string{"email": "dev@test", "password": "Sandi-Kuat-123"}), "", "")
+	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") == "" {
+		t.Fatalf("akun terkunci harus 429: %d %s", w.Code, w.Body.String())
+	}
+	if _, csrf := loginAs(app, t, "admin@test", "Sandi-Kuat-123"); csrf == "" {
+		t.Fatal("akun lain ikut terkunci")
+	}
+	cookie, _ := loginAs(app, t, "admin@test", "Sandi-Kuat-123")
+	if w := dashReq(app, "GET", "/api/admin/audit", nil, cookie, ""); !strings.Contains(w.Body.String(), "auth.login.locked") {
+		t.Fatal("penguncian tidak tercatat di audit")
+	}
+}
+
+// Login yang berhasil tidak dihitung sebagai percobaan (pengguna sah yang
+// sering login tidak terblokir).
+func TestSuccessfulLoginsNotLimited(t *testing.T) {
+	app, _, _ := appTestEnv(t)
+	for i := 0; i < 15; i++ {
+		loginAs(app, t, "admin@test", "Sandi-Kuat-123")
 	}
 }
 

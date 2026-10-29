@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { Satellite, LogIn, ShieldCheck } from '@lucide/svelte';
+	import { Satellite, LogIn, ShieldCheck, RefreshCw } from '@lucide/svelte';
 	import ThemeToggle from '#lib/components/ThemeToggle.svelte';
 	import LangToggle from '#lib/components/LangToggle.svelte';
 	import { api, setCSRF } from '#lib/api.js';
@@ -11,6 +11,36 @@
 	let pass = $state('');
 	let err = $state('');
 	let busy = $state(false);
+
+	// ---- captcha internal (sekali pakai, kedaluwarsa 2 menit) ----
+	let capId = $state('');
+	let capImg = $state('');
+	let capAnswer = $state('');
+	let capLoading = $state(false);
+	let capTimer: ReturnType<typeof setTimeout> | null = null;
+	let lockUntil = $state(0); // epoch ms — tombol masuk nonaktif selama dikunci
+	let tick = $state(Date.now());
+	async function loadCaptcha() {
+		capLoading = true;
+		capAnswer = '';
+		try {
+			const c = await api.get('/api/captcha', { noRedirect: true });
+			capId = c.id;
+			capImg = c.image;
+			if (capTimer) clearTimeout(capTimer);
+			capTimer = setTimeout(loadCaptcha, (c.expires_in - 5) * 1000); // segarkan sebelum kedaluwarsa
+		} catch (e: any) {
+			err = e.message;
+		} finally {
+			capLoading = false;
+		}
+	}
+	$effect(() => {
+		loadCaptcha();
+		const id = setInterval(() => (tick = Date.now()), 1000);
+		return () => { clearInterval(id); if (capTimer) clearTimeout(capTimer); };
+	});
+	const lockLeft = $derived(Math.max(0, Math.ceil((lockUntil - tick) / 1000)));
 
 	$effect(() => {
 		(async () => {
@@ -27,15 +57,18 @@
 		err = '';
 		busy = true;
 		try {
+			const body = { email, password: pass, captcha_id: capId, captcha: capAnswer };
 			const res = needsSetup
-				? await api.post('/api/setup', { email, password: pass }, { noRedirect: true })
-				: await api.post('/api/login', { email, password: pass }, { noRedirect: true });
+				? await api.post('/api/setup', body, { noRedirect: true })
+				: await api.post('/api/login', body, { noRedirect: true });
 			setCSRF(res.csrf);
 			app.me = res.user;
 			toast(needsSetup ? 'Admin dibuat — selamat datang! 🎉' : 'Selamat datang kembali', 'ok');
 			goto('/dashboard', { replace: true });
 		} catch (e: any) {
 			err = e.message;
+			if (e.status === 429) lockUntil = Date.now() + (e.data?.retry_after ?? 60) * 1000;
+			loadCaptcha(); // captcha sekali pakai — selalu ganti setelah percobaan
 		} finally {
 			busy = false;
 		}
@@ -120,8 +153,19 @@
 					placeholder={needsSetup ? '≥12 karakter, huruf besar+kecil+angka' : t('password')}
 					autocomplete={needsSetup ? 'new-password' : 'current-password'} required minlength={8} />
 
-				<div class="form-error" role="alert">{err}</div>
-				<button class="btn auth-submit" type="submit" disabled={busy || needsSetup === null}>
+				<label for="f-captcha">Kode keamanan</label>
+				<div class="captcha">
+					<button type="button" class="cap-img" onclick={loadCaptcha} title="Ganti gambar" aria-label="Ganti gambar captcha">
+						{#if capImg}<img src={capImg} alt="Kode captcha — ketik karakter pada gambar" width="210" height="72" />{/if}
+						<span class="cap-refresh" class:spin={capLoading}><RefreshCw size={14} /></span>
+					</button>
+					<input id="f-captcha" bind:value={capAnswer} placeholder="Ketik 5 karakter" autocomplete="off"
+						autocapitalize="characters" spellcheck="false" maxlength={8} required
+						oninput={() => (capAnswer = capAnswer.toUpperCase())} />
+				</div>
+
+				<div class="form-error" role="alert">{err}{#if lockLeft > 0} ({lockLeft} dtk){/if}</div>
+				<button class="btn auth-submit" type="submit" disabled={busy || needsSetup === null || lockLeft > 0 || !capId}>
 					{#if busy}<span class="spinner"></span>{:else if needsSetup}<ShieldCheck size={16} />{:else}<LogIn size={16} />{/if}
 					{needsSetup ? t('setup_btn') : t('login_btn')}
 				</button>
@@ -151,6 +195,20 @@
 </div>
 
 <style>
+	.captcha { display: flex; gap: 10px; align-items: stretch; }
+	.cap-img {
+		all: unset; cursor: pointer; position: relative; flex: 0 0 auto; border-radius: 10px; overflow: hidden;
+		border: 1px solid var(--border); line-height: 0; width: 150px; height: 52px; background: #e8ecf8;
+	}
+	.cap-img img { width: 150px; height: 52px; object-fit: cover; }
+	.cap-refresh {
+		position: absolute; right: 4px; bottom: 4px; width: 22px; height: 22px; border-radius: 6px;
+		display: grid; place-items: center; color: #334; background: rgb(255 255 255 / .8);
+	}
+	.cap-refresh.spin :global(svg) { animation: cap-spin .8s linear infinite; }
+	@keyframes cap-spin { to { transform: rotate(360deg); } }
+	.captcha input { flex: 1; min-width: 0; letter-spacing: .18em; font-weight: 700; text-transform: uppercase; }
+	.captcha input::placeholder { letter-spacing: normal; text-transform: none; font-weight: 400; }
 	.auth {
 		min-height: 100vh;
 		display: grid;

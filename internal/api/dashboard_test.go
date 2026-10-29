@@ -35,9 +35,21 @@ func dashReq(app *App, method, path string, body any, cookie, csrf string) *http
 	return w
 }
 
+// withCaptcha menambahkan captcha yang sudah diselesaikan ke body login/setup.
+func withCaptcha(app *App, body map[string]string) map[string]string {
+	w := dashReq(app, "GET", "/api/captcha", nil, "", "")
+	var c struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &c)
+	ans, _ := app.captcha.Answer(c.ID)
+	body["captcha_id"], body["captcha"] = c.ID, ans
+	return body
+}
+
 func loginAs(app *App, t *testing.T, email, password string) (cookie, csrf string) {
 	t.Helper()
-	w := dashReq(app, "POST", "/api/login", map[string]string{"email": email, "password": password}, "", "")
+	w := dashReq(app, "POST", "/api/login", withCaptcha(app, map[string]string{"email": email, "password": password}), "", "")
 	if w.Code != 200 {
 		t.Fatalf("login %s: status=%d body=%s", email, w.Code, w.Body.String())
 	}
@@ -62,7 +74,7 @@ func TestSetupWizardFlow(t *testing.T) {
 		t.Fatalf("status = %s", w.Body.String())
 	}
 	// setup kedua ditolak
-	w = dashReq(app, "POST", "/api/setup", map[string]string{"email": "x@y.z", "password": "Sandi-Kuat-123"}, "", "")
+	w = dashReq(app, "POST", "/api/setup", withCaptcha(app, map[string]string{"email": "x@y.z", "password": "Sandi-Kuat-123"}), "", "")
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("setup kedua harus ditolak: %d", w.Code)
 	}
@@ -78,12 +90,12 @@ func TestSetupPasswordWeakRejected(t *testing.T) {
 		t.Fatalf("harus needs_setup: %s", w.Body.String())
 	}
 	// password lemah ditolak (NFR-02)
-	w = dashReq(app, "POST", "/api/setup", map[string]string{"email": "root@x", "password": "lemah"}, "", "")
+	w = dashReq(app, "POST", "/api/setup", withCaptcha(app, map[string]string{"email": "root@x", "password": "lemah"}), "", "")
 	if w.Code != 400 {
 		t.Fatalf("password lemah harus ditolak: %d %s", w.Code, w.Body.String())
 	}
 	// password kuat diterima + cookie sesi
-	w = dashReq(app, "POST", "/api/setup", map[string]string{"email": "root@x", "password": "Kuat-2026-Pass"}, "", "")
+	w = dashReq(app, "POST", "/api/setup", withCaptcha(app, map[string]string{"email": "root@x", "password": "Kuat-2026-Pass"}), "", "")
 	if w.Code != 200 {
 		t.Fatalf("setup gagal: %d %s", w.Code, w.Body.String())
 	}
@@ -95,7 +107,7 @@ func TestSetupPasswordWeakRejected(t *testing.T) {
 func TestLoginLogoutMe(t *testing.T) {
 	app, _, _ := appTestEnv(t)
 	// password salah
-	w := dashReq(app, "POST", "/api/login", map[string]string{"email": "admin@test", "password": "Salah-12345678"}, "", "")
+	w := dashReq(app, "POST", "/api/login", withCaptcha(app, map[string]string{"email": "admin@test", "password": "Salah-12345678"}), "", "")
 	if w.Code != 401 {
 		t.Fatalf("password salah harus 401: %d", w.Code)
 	}
@@ -124,13 +136,13 @@ func TestLoginRateLimit(t *testing.T) {
 	app, st, _ := appTestEnv(t)
 	st.DB.Exec(`DELETE FROM users`) // bersihkan agar login selalu gagal konsisten
 	for i := 0; i < 5; i++ {
-		w := dashReq(app, "POST", "/api/login", map[string]string{"email": "brute@x", "password": "Salah-123456789"}, "", "")
+		w := dashReq(app, "POST", "/api/login", withCaptcha(app, map[string]string{"email": "brute@x", "password": "Salah-123456789"}), "", "")
 		if w.Code != 401 {
 			t.Fatalf("percobaan %d: %d", i, w.Code)
 		}
 	}
 	// percobaan ke-6 → 429 (NFR-05)
-	w := dashReq(app, "POST", "/api/login", map[string]string{"email": "brute@x", "password": "Salah-123456789"}, "", "")
+	w := dashReq(app, "POST", "/api/login", withCaptcha(app, map[string]string{"email": "brute@x", "password": "Salah-123456789"}), "", "")
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("harus 429: %d", w.Code)
 	}

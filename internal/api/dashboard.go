@@ -16,50 +16,6 @@ import (
 
 const sessionCookie = "jr_session"
 
-// loginLimiter rate limit login 5 percobaan/15 menit/IP (NFR-05).
-type loginLimiter struct {
-	mu       sync.Mutex
-	attempts map[string][]time.Time
-	limit    int
-	window   time.Duration
-}
-
-var logins = &loginLimiter{attempts: map[string][]time.Time{}, limit: 5, window: 15 * time.Minute}
-
-// reset membersihkan riwayat (untuk pengujian).
-func (l *loginLimiter) reset() {
-	l.mu.Lock()
-	l.attempts = map[string][]time.Time{}
-	l.mu.Unlock()
-}
-
-// allow melaporkan apakah IP boleh mencoba login lagi.
-func (l *loginLimiter) allow(ip string) (bool, int) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	now := time.Now()
-	if len(l.attempts) > 1000 {
-		// pangkas entri kedaluwarsa agar map tidak tumbuh tanpa batas
-		for k, ts := range l.attempts {
-			if len(ts) == 0 || now.Sub(ts[len(ts)-1]) >= l.window {
-				delete(l.attempts, k)
-			}
-		}
-	}
-	kept := l.attempts[ip][:0]
-	for _, t := range l.attempts[ip] {
-		if now.Sub(t) < l.window {
-			kept = append(kept, t)
-		}
-	}
-	l.attempts[ip] = kept
-	if len(kept) >= l.limit {
-		return false, int(l.window.Seconds() - now.Sub(kept[0]).Seconds())
-	}
-	l.attempts[ip] = append(kept, now)
-	return true, 0
-}
-
 // routesDashboard mendaftarkan endpoint dashboard & API manajemen.
 func (a *App) routesDashboard() {
 	// wizard first-run (NFR-02: tanpa password default)
@@ -67,6 +23,7 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("POST /api/setup", a.handleSetup)
 	// sesi
 	a.mux.HandleFunc("POST /api/login", a.handleLogin)
+	a.mux.HandleFunc("GET /api/captcha", a.handleCaptcha)
 	a.mux.HandleFunc("POST /api/logout", a.requireSession(a.handleLogout, store.RoleViewer, true))
 	a.mux.HandleFunc("GET /api/me", a.requireSession(a.handleMe, store.RoleViewer, false))
 	// admin API
@@ -269,11 +226,16 @@ func (a *App) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email     string `json:"email"`
+		Password  string `json:"password"`
+		CaptchaID string `json:"captcha_id"`
+		Captcha   string `json:"captcha"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "body tidak sah"})
+		return
+	}
+	if !a.checkCaptcha(w, apigateClientIP(r), req.CaptchaID, req.Captcha) {
 		return
 	}
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
@@ -305,28 +267,49 @@ func (a *App) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	ip := apigateClientIP(r)
-	if ok, retry := logins.allow(ip); !ok {
-		w.Header().Set("Retry-After", strconv.Itoa(retry))
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "terlalu banyak percobaan login; coba lagi nanti"})
+	if ok, retry := loginIPFails.blocked(ip); ok {
+		tooMany(w, retry, "terlalu banyak percobaan login dari alamat ini; coba lagi nanti")
 		return
 	}
 	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email     string `json:"email"`
+		Password  string `json:"password"`
+		CaptchaID string `json:"captcha_id"`
+		Captcha   string `json:"captcha"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "body tidak sah"})
 		return
 	}
-	u, err := a.st.GetUserByEmail(strings.TrimSpace(strings.ToLower(req.Email)))
+	// captcha dulu — sebelum hashing password yang mahal
+	if !a.checkCaptcha(w, ip, req.CaptchaID, req.Captcha) {
+		return
+	}
+	email := strings.TrimSpace(strings.ToLower(req.Email))
+	if len(email) > 254 || len(req.Password) > 1024 {
+		writeJSON(w, 400, map[string]string{"error": "body tidak sah"})
+		return
+	}
+	if ok, retry := loginAcctFails.blocked("acct:" + email); ok {
+		tooMany(w, retry, "akun ini dikunci sementara karena terlalu banyak percobaan gagal; coba lagi dalam "+
+			strconv.Itoa((retry+59)/60)+" menit")
+		return
+	}
+	u, err := a.st.GetUserByEmail(email)
 	if err != nil {
 		crypto.VerifyPassword(dummyHash(), req.Password) // samakan waktu respons
 	}
 	if err != nil || !crypto.VerifyPassword(u.PasswordHash, req.Password) {
+		uid := int64(0)
+		if u != nil {
+			uid = u.ID
+		}
+		a.loginFailed(ip, email, uid)
 		// respons seragam agar tidak membocorkan keberadaan email
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "email atau password salah"})
 		return
 	}
+	loginAcctFails.reset("acct:" + email)
 	if u.Status != "active" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "akun dinonaktifkan"})
 		return

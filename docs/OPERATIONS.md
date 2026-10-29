@@ -13,7 +13,12 @@ rotasi key, dan pemecahan masalah umum.
    provider tidak bisa dibaca ulang.
 3. **Password admin.** Argon2id; kebijakan minimal 12 karakter saat dibuat.
    Ganti berkala via dashboard (User → hapus/buat, atau PATCH password).
-4. **Rate limit login**: 5 percobaan / 15 menit / IP (berlaku otomatis).
+4. **Login password (non-Google)**: wajib captcha gambar internal (dirender
+   server, sekali pakai, kedaluwarsa 2 menit; diperiksa sebelum hashing
+   password). Batas kegagalan: 10 / 15 menit per IP dan 5 / 15 menit per akun
+   (akun dikunci sementara, tercatat `auth.login.locked` di audit log); login
+   berhasil tidak dihitung; tiap kegagalan diberi jeda acak. Pembuatan
+   captcha dibatasi 30 / menit per IP.
 5. **Audit log**: semua aksi admin tercatat (dashboard → Pengaturan → Audit log,
    atau `audit_logs` di DB).
 6. **LlamaStash**: pastikan port 11435 **tidak** dibuka ke publik

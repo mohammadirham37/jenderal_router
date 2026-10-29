@@ -32,7 +32,9 @@ func appTestEnv(t *testing.T) (*App, *store.Store, string) {
 		t.Fatalf("NewApp: %v", err)
 	}
 	t.Cleanup(func() { app.Close() })
-	logins.reset()
+	resetAuthLimiters()
+	failDelay = func() {}            // tanpa jeda di test
+	app.captcha.KeepAnswersForTest() // test bisa menyelesaikan captcha
 
 	// super admin
 	admin, err := app.st.CreateUser("admin@test", "Sandi-Kuat-123", store.RoleSuperAdmin)
