@@ -35,21 +35,24 @@ type Config struct {
 	// TrustedProxies CIDR/IP proxy tambahan (selain loopback) yang header
 	// X-Forwarded-For-nya dipercaya, dari JR_TRUSTED_PROXIES (pisah koma).
 	TrustedProxies []string
+	// LogRetentionDays hapus request_logs lebih tua dari N hari (0 = simpan selamanya).
+	LogRetentionDays int
 }
 
 // Load membaca env dan mengembalikan konfigurasi final.
 func Load() (*Config, error) {
 	c := &Config{
-		Addr:          env("JR_ADDR", "127.0.0.1:20130"),
-		PublicURL:     strings.TrimRight(env("JR_PUBLIC_URL", ""), "/"),
-		DataDir:       env("JR_DATA_DIR", "data"),
-		LLamastashURL: strings.TrimRight(env("JR_LLAMASTASH_URL", "http://127.0.0.1:11435/v1"), "/"),
-		LogPrompts:    envBool("JR_LOG_PROMPTS", false),
-		TZ:            env("JR_TZ", "Asia/Jakarta"),
-		SessionTTL:    envDuration("JR_SESSION_TTL", 24*time.Hour),
-		BackupEnabled: envBool("JR_BACKUP_ENABLED", true),
-		BackupHour:    envInt("JR_BACKUP_HOUR", 3),
-		Environment:   env("JR_ENV", "production"),
+		Addr:             env("JR_ADDR", "127.0.0.1:20130"),
+		PublicURL:        strings.TrimRight(env("JR_PUBLIC_URL", ""), "/"),
+		DataDir:          env("JR_DATA_DIR", "data"),
+		LLamastashURL:    strings.TrimRight(env("JR_LLAMASTASH_URL", "http://127.0.0.1:11435/v1"), "/"),
+		LogPrompts:       envBool("JR_LOG_PROMPTS", false),
+		TZ:               env("JR_TZ", "Asia/Jakarta"),
+		SessionTTL:       envDuration("JR_SESSION_TTL", 24*time.Hour),
+		BackupEnabled:    envBool("JR_BACKUP_ENABLED", true),
+		BackupHour:       envInt("JR_BACKUP_HOUR", 3),
+		Environment:      env("JR_ENV", "production"),
+		LogRetentionDays: envInt("JR_LOG_RETENTION_DAYS", 0),
 	}
 	c.DatabaseURL = env("JR_DATABASE_URL", filepath.Join(c.DataDir, "jenderalrouter.db"))
 	c.RedisURL = env("JR_REDIS_URL", "")

@@ -161,12 +161,12 @@ func GetAnalytics(st *store.Store, from, to time.Time) (*AnalyticsSummary, error
 	res := &AnalyticsSummary{From: from.UTC().Format("2006-01-02"), To: to.UTC().Format("2006-01-02")}
 
 	// per hari
-	rows, err := st.DB.Query(`SELECT substr(ts,1,10) d,
+	rows, err := st.DB.Query(`SELECT date(ts, ?) d,
 		COUNT(*), SUM(CASE WHEN status >= 400 OR status = 0 THEN 1 ELSE 0 END),
 		COALESCE(SUM(tokens_in),0), COALESCE(SUM(tokens_out),0), COALESCE(SUM(cost_usd),0),
 		COALESCE(AVG(latency_ms),0)
 		FROM request_logs WHERE ts >= ? AND ts < ? GROUP BY d ORDER BY d`,
-		from.UTC().Format(time.RFC3339Nano), to.UTC().Format(time.RFC3339Nano))
+		dayModifier(), from.UTC().Format(time.RFC3339Nano), to.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, err
 	}
@@ -204,6 +204,9 @@ func GetAnalytics(st *store.Store, from, to time.Time) (*AnalyticsSummary, error
 		}
 		res.PerProvider = append(res.PerProvider, p)
 	}
+	if err := prows.Err(); err != nil {
+		return nil, err
+	}
 
 	// per user
 	urows, err := st.DB.Query(`SELECT COALESCE(l.user_id,0), COALESCE(u.email,'-'), COUNT(*),
@@ -221,6 +224,9 @@ func GetAnalytics(st *store.Store, from, to time.Time) (*AnalyticsSummary, error
 			return nil, err
 		}
 		res.PerUser = append(res.PerUser, u)
+	}
+	if err := urows.Err(); err != nil {
+		return nil, err
 	}
 
 	// persentil latensi

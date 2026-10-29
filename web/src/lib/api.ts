@@ -131,7 +131,10 @@ export function truncate(s: string, n: number): string {
 const TZ = 'Asia/Jakarta';
 export function fmtTs(ts: string | undefined | null): string {
 	if (!ts) return '';
-	const d = new Date(ts);
+	// datetime('now') SQLite = UTC tanpa zona ("2026-10-29 10:00:00") — tanpa
+	// penanda Z browser membacanya sebagai waktu lokal (meleset 7 jam di WIB)
+	const iso = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$/.test(ts) ? ts.replace(' ', 'T') + 'Z' : ts;
+	const d = new Date(iso);
 	if (isNaN(d.getTime())) return ts;
 	const p = new Intl.DateTimeFormat('en-GB', {
 		timeZone: TZ,

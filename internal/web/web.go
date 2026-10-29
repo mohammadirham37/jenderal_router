@@ -3,11 +3,33 @@
 package web
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/base64"
 	"io/fs"
 	"net/http"
+	"regexp"
 	"strings"
 )
+
+var inlineScriptRe = regexp.MustCompile(`(?s)<script>(.*?)</script>`)
+
+// CSP kebijakan keamanan konten untuk UI. Script inline bawaan SvelteKit
+// (bootstrap + tema) diizinkan lewat hash SHA-256 yang dihitung dari
+// index.html ter-embed — tanpa 'unsafe-inline' untuk script. Style inline
+// dipakai luas oleh komponen, jadi style-src mengizinkannya.
+var CSP = func() string {
+	hashes := ""
+	if b, err := distFS.ReadFile("dist/index.html"); err == nil {
+		for _, m := range inlineScriptRe.FindAllSubmatch(b, -1) {
+			sum := sha256.Sum256(m[1])
+			hashes += " 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+		}
+	}
+	return "default-src 'self'; script-src 'self'" + hashes +
+		"; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:" +
+		"; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+}()
 
 //go:embed all:dist
 var distFS embed.FS
@@ -24,6 +46,10 @@ func Handler() http.Handler {
 		// aset build (/_app/…) dan file statis dilayani langsung
 		if path != "" {
 			if _, err := fs.Stat(sub, path); err == nil && !strings.HasSuffix(path, "/") {
+				if strings.HasPrefix(path, "_app/immutable/") {
+					// nama file ber-hash konten → aman di-cache permanen
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				}
 				fileServer.ServeHTTP(w, r)
 				return
 			}

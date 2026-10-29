@@ -48,3 +48,29 @@ func TestGetUserDetailScopedToUser(t *testing.T) {
 		t.Errorf("error_rate = %v", d.ErrorRate)
 	}
 }
+
+// Hari analitik mengikuti JR_TZ: 23:30 UTC = 06:30 WIB hari berikutnya.
+func TestDayGroupingFollowsTimeZone(t *testing.T) {
+	s := usageStore(t)
+	jkt, _ := time.LoadLocation("Asia/Jakarta")
+	SetLocation(jkt)
+	t.Cleanup(func() { SetLocation(time.UTC) })
+	r := NewRecorder(s, 8)
+	ts := time.Date(2026, 10, 28, 23, 30, 0, 0, time.UTC)
+	r.Record(Entry{TS: ts, UserID: 1, RequestedModel: "m", Status: 200})
+	r.Close()
+	d, err := GetUserDetail(s, 1, ts.Add(-time.Hour), ts.Add(time.Hour))
+	if err != nil || len(d.PerDay) != 1 || d.PerDay[0].Day != "2026-10-29" {
+		t.Fatalf("per_day = %+v, %v; mau 2026-10-29 (WIB)", d.PerDay, err)
+	}
+	if got := StartOfToday(ts); !got.Equal(time.Date(2026, 10, 29, 0, 0, 0, 0, jkt)) {
+		t.Fatalf("StartOfToday = %v", got)
+	}
+	u, err := UserTotals(s, 1, ts.Add(-time.Hour), ts.Add(time.Hour))
+	if err != nil || u.Requests != 1 {
+		t.Fatalf("UserTotals = %+v, %v", u, err)
+	}
+	if n, err := PurgeLogs(s, ts.Add(time.Minute)); err != nil || n != 1 {
+		t.Fatalf("PurgeLogs = %d, %v", n, err)
+	}
+}

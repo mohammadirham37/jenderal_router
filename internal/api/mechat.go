@@ -68,18 +68,10 @@ func (a *App) handleMeUsage(w http.ResponseWriter, r *http.Request) {
 			CostLimit: q.CostLimitUSD, UsedCost: q.UsedCost, ResetAt: q.ResetAt})
 	}
 	now := time.Now()
-	from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	res, err := usage.GetAnalytics(a.st, from, now.Add(time.Minute))
+	mine, err := usage.UserTotals(a.st, ai.user.ID, usage.StartOfToday(now), now.Add(time.Minute))
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
-	}
-	var mine usage.UserUsage
-	for _, u := range res.PerUser {
-		if u.UserID == ai.user.ID {
-			mine = u
-			break
-		}
 	}
 	writeJSON(w, 200, map[string]any{
 		"quotas": quotas,

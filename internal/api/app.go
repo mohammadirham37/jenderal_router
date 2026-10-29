@@ -38,6 +38,9 @@ func NewApp(cfg *config.Config) (*App, error) {
 		return nil, err
 	}
 	store.SetMasterKey(cfg.MasterKey)
+	if l, err := time.LoadLocation(cfg.TZ); err == nil {
+		usage.SetLocation(l) // "hari" analitik = hari JR_TZ (sejalan reset kuota)
+	}
 	if err := apigate.SetTrustedProxies(cfg.TrustedProxies); err != nil {
 		st.Close()
 		return nil, err
@@ -116,6 +119,13 @@ func (a *App) RunBackground(ctx context.Context) {
 			if n, err := a.st.PurgeExpiredSessions(); err == nil && n > 0 {
 				slog.Info("sesi kedaluwarsa dibuang", "count", n)
 			}
+			if d := a.cfg.LogRetentionDays; d > 0 {
+				if n, err := usage.PurgeLogs(a.st, time.Now().AddDate(0, 0, -d)); err != nil {
+					slog.Error("retensi log gagal", "err", err)
+				} else if n > 0 {
+					slog.Info("log request lama dibuang", "count", n, "retention_days", d)
+				}
+			}
 		case <-backup.C:
 			if !a.cfg.BackupEnabled {
 				continue
@@ -147,5 +157,20 @@ func (a *App) handleReadyz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) Handler() http.Handler {
-	return a.mux
+	return securityHeaders(a.mux)
+}
+
+// securityHeaders header keamanan untuk semua respons (berlaku juga untuk
+// instalasi tanpa Caddy, mis. lewat Cloudflare Tunnel): anti-clickjacking,
+// anti-MIME sniffing, CSP, dan tanpa referrer ke situs luar.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		h.Set("Content-Security-Policy", web.CSP)
+		next.ServeHTTP(w, r)
+	})
 }

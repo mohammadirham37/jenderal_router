@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -16,21 +17,23 @@ func (a *App) backupDatabase() error {
 	if err := os.MkdirAll(backupDir, 0o700); err != nil {
 		return err
 	}
-	// checkpoint WAL agar file utama mutakhir
-	if _, err := a.st.DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
-		return fmt.Errorf("checkpoint: %w", err)
-	}
-	src := a.cfg.DatabaseURL
-	if src == "" || src == ":memory:" {
+	if a.cfg.DatabaseURL == "" || strings.Contains(a.cfg.DatabaseURL, ":memory:") {
 		return fmt.Errorf("database in-memory tidak dapat dibackup")
 	}
 	name := fmt.Sprintf("jr-%s.db", time.Now().UTC().Format("20060102-150405"))
 	dst := filepath.Join(backupDir, name)
-	data, err := os.ReadFile(src)
-	if err != nil {
+	tmp := dst + ".tmp"
+	_ = os.Remove(tmp)
+	// VACUUM INTO: snapshot konsisten dari SQLite sendiri (aman saat ada
+	// tulisan bersamaan, tanpa memuat seluruh DB ke memori)
+	if _, err := a.st.DB.Exec(`VACUUM INTO ?`, tmp); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("vacuum into: %w", err)
+	}
+	if err := os.Chmod(tmp, 0o600); err != nil {
 		return err
 	}
-	if err := os.WriteFile(dst, data, 0o600); err != nil {
+	if err := os.Rename(tmp, dst); err != nil {
 		return err
 	}
 	a.pruneBackups(backupDir, 7)

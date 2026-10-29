@@ -1092,13 +1092,27 @@ func (a *App) handleExportLogs(w http.ResponseWriter, r *http.Request) {
 	_ = cw.Write([]string{"ts", "user_id", "key_id", "requested_model", "provider", "model",
 		"status", "error_code", "latency_ms", "ttft_ms", "tokens_in", "tokens_out", "cost_usd", "attempts"})
 	for _, l := range logs {
-		_ = cw.Write([]string{
+		_ = cw.Write(csvSafeRow([]string{
 			l["ts"], l["user_id"], l["key_id"], l["requested_model"], l["provider_name"], l["model_name"],
 			l["status"], l["error_code"], l["latency_ms"], l["ttft_ms"], l["tokens_in"], l["tokens_out"],
 			l["cost_usd"], l["attempts"],
-		})
+		}))
 	}
 	cw.Flush()
+}
+
+// csvSafeRow menetralkan sel yang akan dibaca spreadsheet sebagai rumus
+// (diawali = + - @ tab CR) dengan awalan ' — cegah CSV formula injection.
+func csvSafeRow(row []string) []string {
+	for i, v := range row {
+		if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
+			if _, err := strconv.ParseFloat(v, 64); err == nil {
+				continue // angka negatif biasa tetap angka
+			}
+			row[i] = "'" + v
+		}
+	}
+	return row
 }
 
 func (a *App) handleAnalyticsSummary(w http.ResponseWriter, r *http.Request) {

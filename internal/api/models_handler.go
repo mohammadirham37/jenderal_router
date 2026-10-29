@@ -87,18 +87,10 @@ func (a *App) usageMe(w http.ResponseWriter, r *http.Request) {
 
 	// pemakaian hari ini dari log (FR-5.1)
 	now := time.Now()
-	from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	res, err := usage.GetAnalytics(a.st, from, now.Add(time.Minute))
+	mine, err := usage.UserTotals(a.st, ac.User.ID, usage.StartOfToday(now), now.Add(time.Minute))
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
-	}
-	var mine usage.UserUsage
-	for _, u := range res.PerUser {
-		if u.UserID == ac.User.ID {
-			mine = u
-			break
-		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"key": map[string]any{

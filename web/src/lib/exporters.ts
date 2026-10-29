@@ -525,7 +525,13 @@ export function buildPptx(title: string, src: string): Blob {
 
 // ---- CSV ----
 
-const csvCell = (v: string) => (/[";\n,]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v);
+// sel yang diawali = + - @ (atau tab/CR) dibaca Excel/Sheets sebagai rumus —
+// isi jawaban model bisa disusupi (prompt injection), jadi dinetralkan dengan '
+const csvSafe = (v: string) => (/^[=+\-@\t\r]/.test(v) ? "'" + v : v);
+const csvCell = (raw: string) => {
+	const v = csvSafe(raw);
+	return /[";\n,']/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+};
 
 export function buildCsv(title: string, src: string): Blob {
 	const blocks = parseMarkdown(src);

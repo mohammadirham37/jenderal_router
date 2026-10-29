@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -138,5 +140,40 @@ func TestLoginRateLimitIgnoresSpoofedXFF(t *testing.T) {
 	}
 	if blocked == 0 {
 		t.Fatal("XFF palsu melewati rate limit login")
+	}
+}
+
+func TestCSVSafeRow(t *testing.T) {
+	got := csvSafeRow([]string{"=HYPERLINK(\"http://x\")", "+1+1", "@SUM(A1)", "-12.5", "normal", ""})
+	want := []string{"'=HYPERLINK(\"http://x\")", "'+1+1", "'@SUM(A1)", "-12.5", "normal", ""}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("sel %d = %q, mau %q", i, got[i], want[i])
+		}
+	}
+}
+
+// Backup VACUUM INTO menghasilkan DB utuh yang bisa dibuka (juga untuk
+// DatabaseURL berbentuk file:...?..., yang dulu gagal disalin).
+func TestBackupDatabaseSnapshot(t *testing.T) {
+	app, _, _ := appTestEnv(t)
+	if err := app.backupDatabase(); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(app.cfg.DataDir, "backups", "jr-*.db"))
+	if len(matches) != 1 {
+		t.Fatalf("file backup = %v", matches)
+	}
+	fi, _ := os.Stat(matches[0])
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("izin backup = %v, mau 0600", fi.Mode().Perm())
+	}
+	bk, err := store.New(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bk.Close()
+	if _, err := bk.GetUserByEmail("admin@test"); err != nil {
+		t.Fatalf("backup tidak memuat data: %v", err)
 	}
 }
