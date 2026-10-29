@@ -288,3 +288,24 @@ func tempOr(nv *float64, old *float64) *float64 {
 func jsonUnmarshalStore(data []byte, v any) error { return json.Unmarshal(data, v) }
 
 func jsonRaw(s string) json.RawMessage { return json.RawMessage(s) }
+
+// CountMessagesByUser jumlah pesan per percakapan milik user (satu query).
+func (s *Store) CountMessagesByUser(userID int64) (map[int64]int, error) {
+	rows, err := s.DB.Query(`SELECT m.conversation_id, COUNT(*) FROM messages m
+		JOIN conversations c ON c.id = m.conversation_id
+		WHERE c.user_id = ? GROUP BY m.conversation_id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int{}
+	for rows.Next() {
+		var id int64
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}

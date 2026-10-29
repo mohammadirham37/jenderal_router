@@ -5,8 +5,9 @@
 	let {
 		title,
 		onclose,
-		children
-	}: { title: string; onclose: () => void; children: import('svelte').Snippet } = $props();
+		children,
+		wide = false
+	}: { title: string; onclose: () => void; children: import('svelte').Snippet; wide?: boolean } = $props();
 
 	function backdropClick(e: MouseEvent) {
 		if (e.target === e.currentTarget) onclose();
@@ -19,7 +20,7 @@
 <svelte:window on:keydown={keydown} />
 
 <div class="modal-back" onclick={backdropClick} role="presentation">
-	<div class="modal" role="dialog" aria-modal="true" aria-label={title}>
+	<div class="modal" class:wide role="dialog" aria-modal="true" aria-label={title}>
 		<div class="row" style="justify-content:space-between;margin-bottom:6px">
 			<h2 style="margin:0">{title}</h2>
 			<button class="icon-btn" onclick={onclose} aria-label={t('cancel')}><X size={16} /></button>

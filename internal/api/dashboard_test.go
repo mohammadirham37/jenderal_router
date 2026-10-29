@@ -370,3 +370,53 @@ func TestConversationsCRUD(t *testing.T) {
 		t.Fatalf("delete: %d", w.Code)
 	}
 }
+
+func TestAdminViewUserChats(t *testing.T) {
+	app, st, _ := appTestEnv(t)
+	dev, _ := st.GetUserByEmail("dev@test")
+	c, err := st.CreateConversation(dev.ID, "Rencana riset", "local/qwen", "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddMessage(c.ID, "user", "halo", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddMessage(c.ID, "assistant", "hai", "local/qwen", "Local"); err != nil {
+		t.Fatal(err)
+	}
+	cookie, _ := loginAs(app, t, "admin@test", "Sandi-Kuat-123")
+	base := "/api/admin/users/" + fmtInt(dev.ID) + "/conversations"
+
+	w := dashReq(app, "GET", base, nil, cookie, "")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"message_count":2`) ||
+		!strings.Contains(w.Body.String(), "Rencana riset") {
+		t.Fatalf("list = %d %s", w.Code, w.Body.String())
+	}
+	w = dashReq(app, "GET", base+"/"+fmtInt(c.ID), nil, cookie, "")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"content":"hai"`) {
+		t.Fatalf("detail = %d %s", w.Code, w.Body.String())
+	}
+	// percakapan milik user lain lewat id user yang salah → 404
+	admin, _ := st.GetUserByEmail("admin@test")
+	w = dashReq(app, "GET", "/api/admin/users/"+fmtInt(admin.ID)+"/conversations/"+fmtInt(c.ID), nil, cookie, "")
+	if w.Code != 404 {
+		t.Fatalf("salah pemilik harus 404: %d", w.Code)
+	}
+	// akses tercatat di audit
+	w = dashReq(app, "GET", "/api/admin/audit", nil, cookie, "")
+	if !strings.Contains(w.Body.String(), "user.conversation.view") {
+		t.Fatalf("audit = %s", w.Body.String())
+	}
+
+	// admin biasa tidak boleh membaca chat super_admin
+	_, _ = st.CreateUser("admin2@test", "Kuat-2026-Pass", store.RoleAdmin)
+	c2, _ := loginAs(app, t, "admin2@test", "Kuat-2026-Pass")
+	w = dashReq(app, "GET", "/api/admin/users/"+fmtInt(admin.ID)+"/conversations", nil, c2, "")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("admin baca chat super_admin harus 403: %d", w.Code)
+	}
+	// tapi boleh membaca chat member
+	if w = dashReq(app, "GET", base, nil, c2, ""); w.Code != 200 {
+		t.Fatalf("admin baca chat member: %d", w.Code)
+	}
+}

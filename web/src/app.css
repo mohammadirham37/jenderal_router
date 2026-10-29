@@ -331,6 +331,7 @@ input[type='checkbox'] { width: auto; }
 	padding: 22px; width: 100%; max-width: 540px; max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow);
 	animation: slide-in 160ms ease-out;
 }
+.modal.wide { max-width: 880px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 
 /* auth */

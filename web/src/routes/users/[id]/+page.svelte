@@ -1,9 +1,10 @@
 <script lang="ts">
-	import { UserRound, ArrowLeft, Activity, Coins, Gauge, AlertTriangle, Timer, KeyRound, RefreshCw } from '@lucide/svelte';
+	import { UserRound, ArrowLeft, Activity, Coins, Gauge, AlertTriangle, Timer, KeyRound, RefreshCw, MessagesSquare, ShieldAlert } from '@lucide/svelte';
 	import { page } from '$app/state';
-	import { api, fmtNum, fmtCost, fmtTs } from '#lib/api.js';
+	import { api, fmtNum, fmtCost, fmtTs, md } from '#lib/api.js';
 	import { t, toast } from '#lib/stores.svelte.js';
 	import Stat from '#lib/components/Stat.svelte';
+	import Modal from '#lib/components/Modal.svelte';
 
 	const RANGES = [1, 7, 30, 90];
 
@@ -23,6 +24,30 @@
 		}
 	}
 	$effect(() => { void days; void page.params.id; reload(); });
+
+	// ---- riwayat chat (setiap akses tercatat di audit log) ----
+	let convs = $state<any[] | null>(null);
+	let convErr = $state('');
+	let convSearch = $state('');
+	let openConv = $state<any>(null);
+	let convLoading = $state(0);
+	$effect(() => {
+		const id = page.params.id;
+		convs = null;
+		convErr = '';
+		api.get(`/api/admin/users/${id}/conversations`)
+			.then((r) => (convs = r.conversations || []))
+			.catch((e) => (convErr = e.message));
+	});
+	const convFiltered = $derived(
+		(convs || []).filter((c) => !convSearch || c.title.toLowerCase().includes(convSearch.toLowerCase()))
+	);
+	async function viewConv(c: any) {
+		convLoading = c.id;
+		try { openConv = await api.get(`/api/admin/users/${page.params.id}/conversations/${c.id}`); }
+		catch (e: any) { toast(e.message, 'err'); }
+		convLoading = 0;
+	}
 
 	const u = $derived(res?.user);
 	const us = $derived(res?.usage);
@@ -191,8 +216,73 @@
 			</table>
 		</div>
 	</div>
+
+	<div class="card" style="margin-top:14px">
+		<div class="kv" style="margin-bottom:8px">
+			<h2 style="margin:0"><MessagesSquare size={16} /> Riwayat chat</h2>
+			{#if convs}<span class="muted small">{convs.length} percakapan</span>{/if}
+			<span class="grow"></span>
+			<input style="max-width:240px" bind:value={convSearch} placeholder="cari judul…" aria-label="cari judul percakapan" />
+		</div>
+		<p class="muted small" style="margin:0 0 10px"><ShieldAlert size={12} style="vertical-align:-2px" /> Isi chat bersifat pribadi — setiap kali dibuka tercatat di audit log.</p>
+		{#if convErr}
+			<span class="muted small">{convErr}</span>
+		{:else if !convs}
+			<span class="spinner dark"></span>
+		{:else}
+			<div class="table-wrap">
+				<table>
+					<thead><tr><th>Judul</th><th>{t('model')}</th><th>Pesan</th><th>Dibuat</th><th>Terakhir aktif</th><th></th></tr></thead>
+					<tbody>
+						{#each convFiltered as c (c.id)}
+							<tr>
+								<td>{c.title}</td>
+								<td class="mono small">{c.model || '—'}</td>
+								<td>{c.message_count}</td>
+								<td class="mono small">{fmtTs(c.created_at)}</td>
+								<td class="mono small">{fmtTs(c.updated_at)}</td>
+								<td>
+									<button class="btn ghost sm" onclick={() => viewConv(c)} disabled={convLoading === c.id}>
+										{#if convLoading === c.id}<span class="spinner dark"></span>{/if} Buka
+									</button>
+								</td>
+							</tr>
+						{:else}
+							<tr><td colspan="6" class="muted">Belum ada percakapan.</td></tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+	</div>
 {/if}
 
+
+{#if openConv}
+	<Modal wide title={openConv.conversation.title} onclose={() => (openConv = null)}>
+		<div class="muted small" style="margin-bottom:10px">
+			{u?.email} · <span class="mono">{openConv.conversation.model || '—'}</span> · dibuat {fmtTs(openConv.conversation.created_at)}
+		</div>
+		<div class="conv">
+			{#each openConv.messages as m (m.id)}
+				<div class="cmsg {m.role}">
+					<div class="muted small">
+						<b>{m.role === 'user' ? 'User' : m.role === 'assistant' ? 'AI' : 'System'}</b>
+						{#if m.model}· <span class="mono">{m.model}</span>{/if} · {fmtTs(m.created_at)}
+					</div>
+					{#if m.role === 'assistant'}
+						<!-- md() meng-escape HTML sebelum merender markdown -->
+						<div class="cbody md">{@html md(m.content)}</div>
+					{:else}
+						<div class="cbody plain">{m.content}</div>
+					{/if}
+				</div>
+			{:else}
+				<span class="muted small">Percakapan kosong.</span>
+			{/each}
+		</div>
+	</Modal>
+{/if}
 <style>
 	.quota { padding: 8px 0; border-top: 1px solid var(--border); }
 	.quota:first-of-type { border-top: 0; }
@@ -201,4 +291,9 @@
 	.meter { flex: 1; height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 	.fill { height: 100%; background: var(--grad-accent); }
 	.fill.hot { background: var(--err); }
+	.conv { max-height: 65vh; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+	.cmsg { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; }
+	.cmsg.user { background: var(--surface-2); }
+	.cbody { margin-top: 4px; font-size: 13.5px; overflow-wrap: anywhere; }
+	.cbody.plain { white-space: pre-wrap; }
 </style>

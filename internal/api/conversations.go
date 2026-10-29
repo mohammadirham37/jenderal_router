@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jenderal/jenderalrouter/internal/store"
@@ -137,3 +138,79 @@ func (a *App) SaveConversationMessage(conversationID int64, role, content, model
 }
 
 var _ = time.Now
+
+// ---- riwayat chat user untuk admin (halaman detail user) ----
+// Isi chat bersifat pribadi: hanya user yang boleh dikelola aktor
+// (canManageUser) dan setiap akses dicatat di audit log.
+
+// adminChatTarget memuat user target dan memeriksa hak aktor.
+func (a *App) adminChatTarget(w http.ResponseWriter, r *http.Request) (*store.User, bool) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return nil, false
+	}
+	target, err := a.st.GetUser(id)
+	if err != nil {
+		writeJSON(w, 404, map[string]string{"error": "user tidak ada"})
+		return nil, false
+	}
+	if !canManageUser(authFrom(r).user, target) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "tidak boleh melihat chat user ini"})
+		return nil, false
+	}
+	return target, true
+}
+
+func (a *App) handleAdminUserConversations(w http.ResponseWriter, r *http.Request) {
+	target, ok := a.adminChatTarget(w, r)
+	if !ok {
+		return
+	}
+	convs, err := a.st.ListConversations(target.ID)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	counts, err := a.st.CountMessagesByUser(target.ID)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	out := []map[string]any{}
+	for _, c := range convs {
+		out = append(out, map[string]any{
+			"id": c.ID, "title": c.Title, "model": c.Model,
+			"created_at": c.CreatedAt, "updated_at": c.UpdatedAt, "message_count": counts[c.ID],
+		})
+	}
+	a.audit(r, "user.conversations.list", "users/"+fmtInt(target.ID), nil, nil)
+	writeJSON(w, 200, map[string]any{"conversations": out})
+}
+
+func (a *App) handleAdminUserConversation(w http.ResponseWriter, r *http.Request) {
+	target, ok := a.adminChatTarget(w, r)
+	if !ok {
+		return
+	}
+	cid, err := strconv.ParseInt(r.PathValue("cid"), 10, 64)
+	if err != nil || cid <= 0 {
+		writeJSON(w, 400, map[string]string{"error": "id percakapan tidak sah"})
+		return
+	}
+	c, err := a.st.GetConversation(cid)
+	if err != nil || c.UserID != target.ID {
+		writeJSON(w, 404, map[string]string{"error": "percakapan tidak ditemukan"})
+		return
+	}
+	msgs, err := a.st.ListMessages(cid)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if msgs == nil {
+		msgs = []*store.Message{}
+	}
+	a.audit(r, "user.conversation.view", "conversations/"+fmtInt(cid), nil,
+		map[string]string{"owner": target.Email})
+	writeJSON(w, 200, map[string]any{"conversation": c, "messages": msgs})
+}
