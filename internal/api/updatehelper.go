@@ -20,6 +20,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -57,28 +58,94 @@ func applyAvailable() bool {
 	return applyPathUnitInstalled() || sudoApplyAvailable()
 }
 
-// applyUpdateScriptContent harus identik dengan heredoc APPLY di
-// deploy/install-ubuntu.sh — jangan mengubah salah satu tanpa yang lain.
+// applyUpdateScriptContent satu-satunya sumber isi helper root — dipasang
+// oleh `jenderalrouter install-update-helper` (install-ubuntu.sh juga
+// memanggil subcommand itu). Status update membandingkan isi file terpasang
+// dengan konstanta ini untuk mendeteksi helper versi lama.
 const applyUpdateScriptContent = `#!/bin/bash
 # Helper pembaruan JenderalRouter — dipanggil unit apply (root) atau via
 # sudo NOPASSWD. Sengaja sempit: hanya memasang binary hasil build service
-# (yang sudah lolos smoke test) dan me-restart service ini.
+# (yang sudah lolos smoke test), me-restart service ini, dan mengembalikan
+# versi sebelumnya bila versi baru gagal sehat.
 # CATATAN RISIKO: binary distage oleh user service lalu dieksekusi root.
 # Bila tidak menerimanya, hapus /etc/sudoers.d/jenderalrouter-update dan
 # unit jenderalrouter-apply.{path,service}.
 set -euo pipefail
-STAGE=/var/lib/jenderalrouter/updates/jenderalrouter.new
-case "${1:-}" in
+DIR=/var/lib/jenderalrouter/updates
+STAGE=$DIR/jenderalrouter.new
+BAK=$DIR/jenderalrouter.bak
+REQ=$DIR/apply.request
+RESULT=$DIR/apply-result.json
+BIN=/usr/local/bin/jenderalrouter
+SVC=jenderalrouter
+
+result() { # ok(true|false) aksi pesan
+  printf '{"time":"%s","ok":%s,"action":"%s","message":"%s"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$3" > "$RESULT"
+  chmod 0644 "$RESULT"
+}
+
+# sehat = unit aktif DAN /healthz menjawab (bila curl tersedia)
+healthy() {
+  sleep 3
+  /usr/bin/systemctl is-active --quiet "$SVC" || return 1
+  command -v curl >/dev/null 2>&1 || return 0
+  local addr
+  addr="$( (. /etc/default/jenderalrouter 2>/dev/null || true; echo "${JR_ADDR:-127.0.0.1:20130}") )" || addr=127.0.0.1:20130
+  case "$addr" in :*) addr="127.0.0.1$addr" ;; 0.0.0.0:*) addr="127.0.0.1:${addr#0.0.0.0:}" ;; esac
+  for _ in $(seq 1 20); do
+    curl -fsS --max-time 2 "http://$addr/healthz" >/dev/null 2>&1 && \
+      /usr/bin/systemctl is-active --quiet "$SVC" && return 0
+    sleep 1
+  done
+  return 1
+}
+
+swap_in() { # pasang binary $1 lalu restart
+  /usr/bin/systemctl stop "$SVC" || true
+  /usr/bin/install -m 0755 "$1" "$BIN"
+  /usr/bin/systemctl start "$SVC" || true
+}
+
+ACTION="${1:-}"
+# unit path memanggil "install"; isi file permintaan bisa meminta rollback
+if [ "$ACTION" = "install" ] && [ -f "$REQ" ] && grep -qx rollback "$REQ"; then
+  ACTION=rollback
+fi
+
+case "$ACTION" in
   check)
     exit 0
     ;;
   install)
-    [ -f "$STAGE" ]
-    /usr/bin/systemctl stop jenderalrouter || true
-    /usr/bin/install -m 0755 "$STAGE" /usr/local/bin/jenderalrouter
+    rm -f "$REQ"
+    if [ ! -f "$STAGE" ]; then result false install "tidak ada binary hasil stage"; exit 1; fi
+    /usr/bin/install -m 0755 "$BIN" "$BAK"
+    swap_in "$STAGE"
     rm -f "$STAGE"
-    rm -f /var/lib/jenderalrouter/updates/apply.request
-    /usr/bin/systemctl start jenderalrouter
+    if healthy; then result true install "versi baru aktif"; exit 0; fi
+    swap_in "$BAK"
+    if healthy; then
+      result false install "versi baru gagal sehat - otomatis dikembalikan ke versi sebelumnya"
+    else
+      result false install "versi baru gagal dan rollback juga gagal - periksa journalctl -u jenderalrouter"
+    fi
+    exit 1
+    ;;
+  rollback)
+    rm -f "$REQ"
+    if [ ! -f "$BAK" ]; then result false rollback "tidak ada backup versi sebelumnya"; exit 1; fi
+    /usr/bin/install -m 0755 "$BIN" "$DIR/jenderalrouter.cur"
+    swap_in "$BAK"
+    if healthy; then
+      mv -f "$DIR/jenderalrouter.cur" "$BAK" # tukar: versi tadi jadi backup
+      result true rollback "versi sebelumnya aktif kembali"
+      exit 0
+    fi
+    swap_in "$DIR/jenderalrouter.cur"
+    rm -f "$DIR/jenderalrouter.cur"
+    result false rollback "versi sebelumnya gagal sehat - versi semula dipulihkan"
+    exit 1
     ;;
   *)
     exit 2
@@ -107,7 +174,8 @@ ExecStart=/usr/local/lib/jenderalrouter/apply-update.sh install
 func sudoersContent() []byte {
 	return []byte(
 		helperUser + " ALL=(root) NOPASSWD: " + helperScriptPath + " check\n" +
-			helperUser + " ALL=(root) NOPASSWD: " + helperScriptPath + " install\n")
+			helperUser + " ALL=(root) NOPASSWD: " + helperScriptPath + " install\n" +
+			helperUser + " ALL=(root) NOPASSWD: " + helperScriptPath + " rollback\n")
 }
 
 // selfBin path binary yang sedang berjalan — untuk instruksi pemasangan.
@@ -181,7 +249,7 @@ func InstallUpdateHelper() int {
 	}
 	_ = os.Chown(helperSudoers, 0, 0)
 	_ = os.Chmod(helperSudoers, 0o440)
-	fmt.Println(">> sudoers terpasang:", helperSudoers, "(fallback, user " + helperUser + ")")
+	fmt.Println(">> sudoers terpasang:", helperSudoers, "(fallback, user "+helperUser+")")
 	fmt.Println(">> helper pembaruan dashboard AKTIF — 'Perbarui sekarang' kini memasang binary + restart otomatis.")
 	return 0
 }
@@ -210,25 +278,87 @@ func (a *App) handleSystemUpdateApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.audit(r, "system.update.apply", "system", nil, nil)
+	a.triggerHelper(w, "install")
+}
 
+// handleSystemUpdateRollback POST /api/admin/system/update/rollback —
+// kembalikan binary sebelumnya (backup yang dibuat helper saat pemasangan
+// terakhir) lalu restart service.
+func (a *App) handleSystemUpdateRollback(w http.ResponseWriter, r *http.Request) {
+	if inContainer() {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": "mode container: rollback dilakukan dari host (docker compose)"})
+		return
+	}
+	if !fileExists(backupBinPath()) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "belum ada backup versi sebelumnya"})
+		return
+	}
+	a.audit(r, "system.update.rollback", "system", map[string]string{"version": Version}, nil)
+	a.triggerHelper(w, "rollback")
+}
+
+// triggerHelper menjalankan aksi helper root (install|rollback). Via path
+// unit: service hanya menulis file permintaan (isinya "rollback" untuk
+// rollback); via sudo: helper dijalankan langsung. Keduanya me-restart
+// service ini, jadi respons dikirim lebih dulu.
+func (a *App) triggerHelper(w http.ResponseWriter, action string) {
+	_ = os.Remove(applyResultPath()) // hasil lama dibuang — UI menunggu yang baru
 	if applyPathUnitInstalled() {
-		if err := os.WriteFile(applyRequestPath(), []byte(time.Now().UTC().Format(time.RFC3339Nano)), 0o644); err != nil {
+		content := time.Now().UTC().Format(time.RFC3339Nano)
+		if action == "rollback" {
+			content = "rollback"
+		}
+		if err := os.WriteFile(applyRequestPath(), []byte(content+"\n"), 0o644); err != nil {
 			writeJSON(w, 500, map[string]string{"error": "gagal menulis permintaan apply: " + err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusAccepted, map[string]any{"started": true, "mode": "path_unit"})
+		writeJSON(w, http.StatusAccepted, map[string]any{"started": true, "mode": "path_unit", "action": action})
 		return
 	}
 	if sudoApplyAvailable() {
 		go func() {
 			time.Sleep(500 * time.Millisecond) // beri waktu respons terkirim dulu
-			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 			defer cancel()
-			_ = exec.CommandContext(ctx, "sudo", "-n", helperScriptPath, "install").Run()
+			_ = exec.CommandContext(ctx, "sudo", "-n", helperScriptPath, action).Run()
 		}()
-		writeJSON(w, http.StatusAccepted, map[string]any{"started": true, "mode": "sudo"})
+		writeJSON(w, http.StatusAccepted, map[string]any{"started": true, "mode": "sudo", "action": action})
 		return
 	}
 	writeJSON(w, http.StatusNotImplemented, map[string]string{
 		"error": "helper pembaruan belum terpasang — jalankan sekali di host: sudo " + selfBin() + " install-update-helper"})
+}
+
+func backupBinPath() string   { return filepath.Join(stageDir(), "jenderalrouter.bak") }
+func applyResultPath() string { return filepath.Join(stageDir(), "apply-result.json") }
+
+// applyResult hasil aksi helper terakhir (ditulis helper root).
+type applyResult struct {
+	Time    string `json:"time"`
+	OK      bool   `json:"ok"`
+	Action  string `json:"action"`
+	Message string `json:"message"`
+}
+
+func readApplyResult() *applyResult {
+	b, err := os.ReadFile(applyResultPath())
+	if err != nil {
+		return nil
+	}
+	var res applyResult
+	if json.Unmarshal(b, &res) != nil {
+		return nil
+	}
+	return &res
+}
+
+// helperOutdated true bila helper terpasang tapi isinya bukan versi binary
+// ini (mis. helper lama tanpa rollback) — perlu install-update-helper ulang.
+func helperOutdated() bool {
+	b, err := os.ReadFile(applyUpdateScript)
+	if err != nil {
+		return false
+	}
+	return string(b) != applyUpdateScriptContent
 }

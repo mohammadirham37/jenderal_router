@@ -168,3 +168,60 @@ func TestExtractBearerLike(t *testing.T) {
 		t.Fatalf("got = %q", got)
 	}
 }
+
+func TestRunningCommit(t *testing.T) {
+	old := Version
+	t.Cleanup(func() { Version = old })
+	cases := map[string]string{
+		"0ed322d":           "0ed322d",
+		"0ed322d-dirty":     "0ed322d",
+		"v1.2.0-3-g0ed322d": "0ed322d",
+		"v1.2.0":            "",
+		"0.1.0-dev":         "",
+		"dev":               "",
+		"0ED322D":           "",
+	}
+	for in, want := range cases {
+		Version = in
+		if got := runningCommit(); got != want {
+			t.Errorf("runningCommit(%q) = %q, mau %q", in, got, want)
+		}
+	}
+}
+
+func TestGitLogPending(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git tidak tersedia")
+	}
+	base := t.TempDir()
+	origin := filepath.Join(base, "origin")
+	clone := filepath.Join(base, "clone")
+	_ = os.MkdirAll(origin, 0o755)
+	initTestRepo(t, origin)
+	if out, err := exec.Command("git", "clone", "file://"+origin, clone).CombinedOutput(); err != nil {
+		t.Fatalf("clone: %v (%s)", err, out)
+	}
+	for _, msg := range []string{"feat: satu", "fix: dua"} {
+		c := exec.Command("git", "-C", origin, "commit", "--allow-empty", "-m", msg)
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=budi", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("commit: %v (%s)", err, out)
+		}
+	}
+	ctx := context.Background()
+	if err := gitFetch(ctx, clone); err != nil {
+		t.Fatal(err)
+	}
+	head := gitHead(clone)
+	if !gitHasCommit(ctx, clone, head) || gitHasCommit(ctx, clone, "deadbeef") {
+		t.Fatal("gitHasCommit salah")
+	}
+	got := gitLog(ctx, clone, head+"..origin/main", 50)
+	if len(got) != 2 || got[0].Subject != "fix: dua" || got[1].Subject != "feat: satu" || got[0].Author != "budi" {
+		t.Fatalf("pending = %+v", got)
+	}
+	if got := gitLog(ctx, clone, "origin/main..origin/main", 50); len(got) != 0 {
+		t.Fatalf("rentang kosong = %+v", got)
+	}
+}

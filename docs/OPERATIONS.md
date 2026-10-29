@@ -100,9 +100,13 @@ Perhatian: fallback streaming hanya terjadi **sebelum token pertama**
 
 ## 7. Pembaruan & LlamaStash dari dashboard
 
-### Pembaruan aplikasi (Pengaturan → Pembaruan Aplikasi)
+### Pembaruan aplikasi (menu Sistem → Pembaruan, `/update`)
 
-- Tombol **Cek pembaruan**: fetch origin + hitung commit ketinggalan.
+- Tombol **Cek pembaruan**: fetch origin, lalu tampilkan daftar commit yang
+  belum terpasang (changelog). Pembandingnya commit binary yang **sedang
+  berjalan** (dicap lewat `-X …/internal/api.Version=$(git describe)` saat
+  build), bukan HEAD mirror — build yang sudah distage tapi belum dipasang
+  tetap terhitung belum terbarui.
 - Tombol **Perbarui sekarang** (super_admin): clone/mirror repo ke
   `<data>/src` (milik user service), reset ke `origin/main`, build binary
   baru, smoke test, lalu:
@@ -115,6 +119,15 @@ Perhatian: fallback streaming hanya terjadi **sebelum token pertama**
     `apply-update.sh` — penting karena unit service memakai
     `NoNewPrivileges=true` (sudo mustahil dari dalam service); sudoers
     NOPASSWD tetap dipasang sebagai fallback host non-systemd.
+    Helper membackup binary lama ke `<data>/updates/jenderalrouter.bak`,
+    memasang yang baru, lalu memeriksa kesehatan (`systemctl is-active` +
+    `GET /healthz`). Gagal sehat → binary lama dipulihkan otomatis. Hasilnya
+    ditulis ke `<data>/updates/apply-result.json` dan tampil di dashboard.
+  - Tombol **Kembalikan versi sebelumnya** (`POST
+    /api/admin/system/update/rollback`) memasang binary backup; versi yang
+    sedang berjalan menjadi backup baru (bisa maju lagi).
+  - Helper versi lama (tanpa rollback) terdeteksi otomatis — dashboard
+    menampilkan perintah `install-update-helper` untuk memperbaruinya.
   - tanpa helper: binary distage di `<data>/updates/jenderalrouter.new`
     dan dashboard menampilkan satu perintah pemasangan helper:
     `sudo /usr/local/bin/jenderalrouter install-update-helper`

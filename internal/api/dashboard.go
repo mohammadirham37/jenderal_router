@@ -110,6 +110,7 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("GET /api/admin/system/update/status", a.requireSession(a.handleSystemUpdateStatus, store.RoleAdmin, false))
 	a.mux.HandleFunc("POST /api/admin/system/update", a.requireSession(a.handleSystemUpdate, store.RoleSuperAdmin, true))
 	a.mux.HandleFunc("POST /api/admin/system/update/apply", a.requireSession(a.handleSystemUpdateApply, store.RoleSuperAdmin, true))
+	a.mux.HandleFunc("POST /api/admin/system/update/rollback", a.requireSession(a.handleSystemUpdateRollback, store.RoleSuperAdmin, true))
 	a.mux.HandleFunc("GET /api/admin/system/stats", a.requireSession(a.handleSystemStats, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/system/cloudflare", a.requireSession(a.handleCloudflareStatus, store.RoleAdmin, false))
 	a.mux.HandleFunc("POST /api/admin/local/models/{name}/start", a.requireSession(a.handleLocalModelStart, store.RoleAdmin, true))

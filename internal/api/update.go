@@ -130,6 +130,65 @@ func gitRemoteCommitInfo(ctx context.Context, repo, branch string) (hash, subjec
 	return parts[0], ""
 }
 
+// runningCommit hash commit binary yang sedang berjalan, diambil dari
+// Version hasil `git describe --tags --always [--dirty]` (mis. "0ed322d",
+// "v1.2-3-g0ed322d"). Kosong bila Version bukan cap git (build rilis/dev).
+func runningCommit() string {
+	v := strings.TrimSuffix(Version, "-dirty")
+	if i := strings.LastIndex(v, "-g"); i >= 0 {
+		v = v[i+2:]
+	}
+	if len(v) < 7 || len(v) > 40 {
+		return ""
+	}
+	for _, c := range v {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return ""
+		}
+	}
+	return v
+}
+
+// gitHasCommit true bila commit ada di repo (sudah ter-fetch).
+func gitHasCommit(ctx context.Context, repo, rev string) bool {
+	return rev != "" && gitCmd(ctx, repo, "cat-file", "-e", rev+"^{commit}").Run() == nil
+}
+
+func gitDescribe(ctx context.Context, repo string) string {
+	out, err := gitCmd(ctx, repo, "describe", "--tags", "--always").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// commitInfo satu baris changelog.
+type commitInfo struct {
+	Hash    string `json:"hash"`
+	Subject string `json:"subject"`
+	Author  string `json:"author"`
+	Date    string `json:"date"`
+}
+
+// gitLog daftar commit pada rentang rev (mis. "abc..origin/main"), terbaru dulu.
+func gitLog(ctx context.Context, repo, rev string, limit int) []commitInfo {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	out, err := gitCmd(ctx, repo, "log", fmt.Sprintf("-%d", limit),
+		"--format=%h%x1f%s%x1f%an%x1f%cI", rev).Output()
+	if err != nil {
+		return nil
+	}
+	list := []commitInfo{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		p := strings.Split(line, "\x1f")
+		if len(p) == 4 {
+			list = append(list, commitInfo{Hash: p[0], Subject: p[1], Author: p[2], Date: p[3]})
+		}
+	}
+	return list
+}
+
 // ---- job pembaruan (asinkron, log live) ----
 
 type updateJob struct {
@@ -345,6 +404,11 @@ func (a *App) updateStatusView(r *http.Request) map[string]any {
 		st["apply_mode"] = ""
 	}
 	st["staged_binary"] = fileExists(filepath.Join(stageDir(), "jenderalrouter.new"))
+	st["backup_available"] = fileExists(backupBinPath())
+	st["helper_outdated"] = helperOutdated()
+	if res := readApplyResult(); res != nil {
+		st["apply_result"] = res
+	}
 	if lu := readLastUpdate(); lu.Time != "" {
 		st["last_update"] = lu
 	}
@@ -393,12 +457,22 @@ func (a *App) updateStatusView(r *http.Request) map[string]any {
 		st["remote_head"] = remoteHead
 		st["remote_commit"], st["remote_subject"] = gitRemoteCommitInfo(r.Context(), dir, branch)
 
-		if n, err := gitBehind(r.Context(), dir); err == nil {
-			st["behind_commits"] = n
-			st["update_available"] = n > 0 || (remoteHead != "" && remoteHead != localHead)
-		} else if remoteHead != "" {
-			st["update_available"] = remoteHead != localHead
+		// basis pembanding = commit binary yang BERJALAN (bila tercap & ada di
+		// mirror); else HEAD mirror. Dengan begitu build yang distage tapi
+		// belum terpasang tetap terhitung belum terbarui.
+		base := localHead
+		if rc := runningCommit(); gitHasCommit(r.Context(), dir, rc) {
+			base = rc
+			st["running_commit"] = rc
 		}
+		pending := gitLog(r.Context(), dir, base+"..origin/"+branch, 50)
+		if pending == nil {
+			pending = []commitInfo{}
+		}
+		st["pending_commits"] = pending
+		st["behind_commits"] = len(pending)
+		st["update_available"] = len(pending) > 0
+		st["recent_commits"] = gitLog(r.Context(), dir, base, 10)
 	}
 	return st
 }
@@ -489,7 +563,9 @@ func (a *App) handleSystemUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		newHead := gitHead(dir)
-		if behind == 0 && newHead == oldHead {
+		rc := runningCommit()
+		runningIsHead := rc == "" || strings.HasPrefix(newHead, rc) || strings.HasPrefix(rc, newHead)
+		if behind == 0 && newHead == oldHead && runningIsHead {
 			markFetched()
 			job.mu.Lock()
 			job.running, job.done, job.ok = false, true, true
@@ -510,7 +586,14 @@ func (a *App) handleSystemUpdate(w http.ResponseWriter, r *http.Request) {
 		_ = os.MkdirAll(stageDir(), 0o700)
 		buildCtx, buildCancel := context.WithTimeout(ctx, 15*time.Minute)
 		defer buildCancel()
-		cmd := exec.CommandContext(buildCtx, goBin, "build", "-trimpath", "-ldflags", "-s -w", "-o", stage, "./cmd/jenderalrouter")
+		buildVer := gitDescribe(ctx, dir)
+		if buildVer == "" {
+			buildVer = newHead
+		}
+		job.appendLog("versi build: %s", buildVer)
+		cmd := exec.CommandContext(buildCtx, goBin, "build", "-trimpath",
+			"-ldflags", "-s -w -X github.com/jenderal/jenderalrouter/internal/api.Version="+buildVer,
+			"-o", stage, "./cmd/jenderalrouter")
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH,
 			"PATH=/usr/local/go/bin:"+filepath.Dir(goBin)+":"+os.Getenv("PATH"))
@@ -547,6 +630,7 @@ func (a *App) handleSystemUpdate(w http.ResponseWriter, r *http.Request) {
 			// tanpa sudo: tulis file permintaan — unit jenderalrouter-apply.path
 			// (root) yang menjalankan pemasangan; service lalu di-restart
 			job.setPhase("memasang & me-restart service (unit path systemd)")
+			_ = os.Remove(applyResultPath())
 			if err := os.WriteFile(applyRequestPath(), []byte(time.Now().UTC().Format(time.RFC3339Nano)), 0o644); err != nil {
 				fail("gagal menulis permintaan apply: " + err.Error())
 				return
@@ -559,7 +643,8 @@ func (a *App) handleSystemUpdate(w http.ResponseWriter, r *http.Request) {
 				Time: time.Now().UTC().Format(time.RFC3339), From: fromVersion, To: newHead, Commits: behind,
 			})
 			job.setPhase("memasang & me-restart service (helper sudo)")
-			applyCtx, applyCancel := context.WithTimeout(context.Background(), 90*time.Second)
+			_ = os.Remove(applyResultPath())
+			applyCtx, applyCancel := context.WithTimeout(context.Background(), 150*time.Second)
 			defer applyCancel()
 			if err := exec.CommandContext(applyCtx, "sudo", "-n", applyUpdateScript, "install").Run(); err != nil {
 				fail("apply gagal: " + err.Error())
