@@ -147,33 +147,4 @@ export function fmtTs(ts: string | undefined | null): string {
 }
 
 // markdown mini → html (heading, bold, italic, code, list, link)
-export function md(src: string): string {
-	const esc = (x: string) =>
-		x.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
-	let html = '';
-	let inCode = false;
-	let codeBuf = '';
-	let inList = false;
-	const inline = (x: string) =>
-		esc(x)
-			.replace(/`([^`]+)`/g, '<code>$1</code>')
-			.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-			.replace(/\*([^*]+)\*/g, '<em>$1</em>')
-			.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-	const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
-	for (const line of (src || '').split('\n')) {
-		if (line.trim().startsWith('```')) {
-			if (inCode) { html += `<pre><code>${esc(codeBuf)}</code></pre>`; codeBuf = ''; inCode = false; }
-			else { closeList(); inCode = true; }
-			continue;
-		}
-		if (inCode) { codeBuf += line + '\n'; continue; }
-		if (/^#{1,4}\s/.test(line)) { closeList(); html += `<p><strong>${inline(line.replace(/^#+\s/, ''))}</strong></p>`; }
-		else if (/^[-*]\s/.test(line)) { if (!inList) { html += '<ul>'; inList = true; } html += `<li>${inline(line.replace(/^[-*]\s/, ''))}</li>`; }
-		else if (line.trim() === '') closeList();
-		else { closeList(); html += `<p>${inline(line)}</p>`; }
-	}
-	if (inCode) html += `<pre><code>${esc(codeBuf)}</code></pre>`;
-	closeList();
-	return html || '<p></p>';
-}
+export { md } from './markdown.js';
