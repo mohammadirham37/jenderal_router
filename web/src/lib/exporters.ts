@@ -2,6 +2,9 @@
 // Semua dibangun mandiri (ZIP metode STORE + OOXML minimal) agar tidak
 // menambah dependensi npm — lingkungan build web terbatas.
 
+import { buildReportDocx } from './docgen/report.js';
+import { buildDeckPptx } from './docgen/deck.js';
+
 // ---- ZIP (metode store, tanpa kompresi) ----
 
 const CRC_TABLE = (() => {
@@ -112,7 +115,7 @@ const xmlEsc = (s: string) =>
 export type Block =
 	| { kind: 'heading'; level: number; text: string }
 	| { kind: 'para'; text: string }
-	| { kind: 'bullet'; text: string; level: number }
+	| { kind: 'bullet'; text: string; level: number; ordered?: boolean }
 	| { kind: 'quote'; text: string }
 	| { kind: 'code'; text: string }
 	| { kind: 'table'; header: string[]; rows: string[][] };
@@ -158,6 +161,16 @@ export function parseMarkdown(src: string): Block[] {
 			i++;
 			continue;
 		}
+		const o = line.match(/^(\s*)\d+[.)]\s+(.*)/);
+		if (o) {
+			blocks.push({ kind: 'bullet', ordered: true, level: Math.min(2, Math.floor(o[1].length / 3)), text: o[2].trim() });
+			i++;
+			continue;
+		}
+		if (/^\s*(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$/.test(line)) {
+			i++; // garis pemisah markdown — diabaikan
+			continue;
+		}
 		const q = line.match(/^\s*>\s?(.*)/);
 		if (q) {
 			blocks.push({ kind: 'quote', text: q[1].trim() });
@@ -172,7 +185,7 @@ export function parseMarkdown(src: string): Block[] {
 		while (
 			i < lines.length &&
 			lines[i].trim() !== '' &&
-			!/^\s*(```|#{1,6}\s|\s*[-*+]\s|>\s)/.test(lines[i]) &&
+			!/^\s*(```|#{1,6}\s|\s*[-*+]\s|\d+[.)]\s|>\s)/.test(lines[i]) &&
 			!(lines[i].includes('|') && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1]))
 		) {
 			buf.push(lines[i].trim());
@@ -183,97 +196,31 @@ export function parseMarkdown(src: string): Block[] {
 	return blocks;
 }
 
-// token inline: **tebal**, *miring*, `kode`
-type Run = { text: string; bold?: boolean; italic?: boolean; code?: boolean };
-function inlineRuns(s: string): Run[] {
+// token inline: **tebal**, *miring*, `kode`, [teks](https://…)
+export type Run = { text: string; bold?: boolean; italic?: boolean; code?: boolean; link?: string };
+export function inlineRuns(s: string): Run[] {
 	const out: Run[] = [];
-	const re = /\*\*([^*]+)\*\*|`([^`]+)`|\*([^*]+)\*/g;
+	const re = /\*\*([^*]+)\*\*|`([^`]+)`|\*([^*]+)\*|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
 	let last = 0;
 	let m: RegExpExecArray | null;
 	while ((m = re.exec(s))) {
 		if (m.index > last) out.push({ text: s.slice(last, m.index) });
 		if (m[1] !== undefined) out.push({ text: m[1], bold: true });
 		else if (m[2] !== undefined) out.push({ text: m[2], code: true });
-		else out.push({ text: m[3], italic: true });
+		else if (m[3] !== undefined) out.push({ text: m[3], italic: true });
+		else out.push({ text: m[4], link: m[5] });
 		last = re.lastIndex;
 	}
 	if (last < s.length) out.push({ text: s.slice(last) });
 	return out.filter((r) => r.text);
 }
 
-const plain = (s: string) =>
+export const plain = (s: string) =>
 	inlineRuns(s)
 		.map((r) => r.text)
 		.join('');
 
-// ---- DOCX ----
-
-function docxRuns(text: string, size: number, mono = false): string {
-	return inlineRuns(text)
-		.map(({ text: t, bold, italic, code }) => {
-			const props: string[] = [];
-			if (bold) props.push('<w:b/>');
-			if (italic) props.push('<w:i/>');
-			if (code || mono) props.push('<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/><w:sz w:val="20"/>');
-			else props.push(`<w:sz w:val="${size}"/>`);
-			return `<w:r><w:rPr>${props.join('')}</w:rPr><w:t xml:space="preserve">${xmlEsc(t)}</w:t></w:r>`;
-		})
-		.join('');
-}
-
-function docxPara(text: string, size = 22, extra = '', mono = false): string {
-	return `<w:p><w:pPr>${extra}</w:pPr>${docxRuns(text, size, mono) || '<w:r/>'}</w:p>`;
-}
-
-function docxTable(header: string[], rows: string[][]): string {
-	const border = '<w:top w:val="single" w:sz="4" w:color="BBBBBB"/><w:left w:val="single" w:sz="4" w:color="BBBBBB"/><w:bottom w:val="single" w:sz="4" w:color="BBBBBB"/><w:right w:val="single" w:sz="4" w:color="BBBBBB"/><w:insideH w:val="single" w:sz="4" w:color="BBBBBB"/><w:insideV w:val="single" w:sz="4" w:color="BBBBBB"/>';
-	const headCell = (t: string) =>
-		`<w:tc><w:tcPr/><w:p><w:pPr><w:spacing w:after="40"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/></w:rPr><w:t xml:space="preserve">${xmlEsc(plain(t))}</w:t></w:r></w:p></w:tc>`;
-	const bodyCell = (t: string) =>
-		`<w:tc><w:tcPr/><w:p><w:pPr><w:spacing w:after="40"/></w:pPr>${docxRuns(plain(t), 20)}</w:p></w:tc>`;
-	return `<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders>${border}</w:tblBorders></w:tblPr><w:tr>${header
-		.map(headCell)
-		.join('')}</w:tr>${rows
-		.map((r) => `<w:tr>${header.map((_, ci) => bodyCell(r[ci] ?? '')).join('')}</w:tr>`)
-		.join('')}</w:tbl>`;
-}
-
-export function buildDocx(title: string, src: string): Blob {
-	const zip = new ZipWriter();
-	const body: string[] = [docxPara(title, 32, '<w:spacing w:after="240"/>')];
-	for (const b of parseMarkdown(src)) {
-		if (b.kind === 'heading') {
-			body.push(docxPara(b.text, b.level === 1 ? 40 : 32, '<w:spacing w:before="240" w:after="120"/>'));
-		} else if (b.kind === 'bullet') {
-			body.push(docxPara('• ' + b.text, 22, `<w:ind w:left="${360 + 360 * b.level}"/><w:spacing w:after="60"/>`));
-		} else if (b.kind === 'quote') {
-			body.push(
-				`<w:p><w:pPr><w:ind w:left="480"/></w:pPr><w:r><w:rPr><w:i/><w:sz w:val="22"/></w:rPr><w:t xml:space="preserve">${xmlEsc(b.text)}</w:t></w:r></w:p>`
-			);
-		} else if (b.kind === 'code') {
-			for (const line of b.text.split('\n')) body.push(docxPara(line === '' ? ' ' : line, 20, '', true));
-		} else if (b.kind === 'table') {
-			body.push(docxTable(b.header, b.rows));
-			body.push('<w:p/>');
-		} else {
-			body.push(docxPara(b.text));
-		}
-	}
-	const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body.join('')}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`;
-	zip.add(
-		'[Content_Types].xml',
-		`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`
-	);
-	zip.add(
-		'_rels/.rels',
-		`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`
-	);
-	zip.add('word/document.xml', document);
-	return zip.finish();
-}
+// ---- DOCX & PPTX: lihat docgen/report.ts dan docgen/deck.ts ----
 
 // ---- XLSX ----
 
@@ -393,136 +340,6 @@ export function buildXlsx(title: string, src: string): Blob {
 	return xlsxZip([{ name: sheetName('Catatan', used), rows }]);
 }
 
-// ---- PPTX ----
-
-type SlideItem = { text: string; level: number; bold?: boolean };
-type Slide = { title: string; items: SlideItem[] };
-
-function planSlides(title: string, src: string): Slide[] {
-	const blocks = parseMarkdown(src);
-	const sections: { heading: string | null; blocks: Block[] }[] = [{ heading: null, blocks: [] }];
-	for (const b of blocks) {
-		if (b.kind === 'heading' && b.level <= 2) sections.push({ heading: b.text, blocks: [] });
-		else sections[sections.length - 1].blocks.push(b);
-	}
-
-	const toItems = (bs: Block[]): SlideItem[] => {
-		const items: SlideItem[] = [];
-		for (const b of bs) {
-			if (b.kind === 'heading') items.push({ text: plain(b.text), level: 0, bold: true });
-			else if (b.kind === 'bullet') items.push({ text: plain(b.text), level: b.level });
-			else if (b.kind === 'quote') items.push({ text: '"' + plain(b.text) + '"', level: 0 });
-			else if (b.kind === 'code')
-				b.text.split('\n').slice(0, 8).forEach((l) => items.push({ text: l, level: 1 }));
-			else if (b.kind === 'table') {
-				items.push({ text: b.header.map(plain).join(' — '), level: 0, bold: true });
-				for (const r of b.rows.slice(0, 10))
-					items.push({ text: b.header.map((_, ci) => plain(r[ci] ?? '')).join(' — '), level: 1 });
-			} else items.push({ text: plain(b.text), level: 0 });
-		}
-		return items.filter((it) => it.text).slice(0, 30);
-	};
-
-	const slides: Slide[] = [{ title, items: [] }];
-	for (const s of sections) {
-		if (s.heading === null) {
-			const items = toItems(s.blocks);
-			if (items.length && slides.length === 1) slides[0].items = items;
-			continue;
-		}
-		slides.push({ title: plain(s.heading), items: toItems(s.blocks) });
-	}
-	return slides;
-}
-
-function pptxTxBody(items: SlideItem[]): string {
-	const paras = items.length
-		? items
-				.map(
-					(it) =>
-						`<a:p><a:pPr lvl="${it.level}"><a:buChar char="•"/></a:pPr><a:r><a:rPr lang="id-ID" sz="1500"${it.bold ? ' b="1"' : ''} dirty="0"/><a:t>${xmlEsc(it.text)}</a:t></a:r></a:p>`
-				)
-				.join('')
-		: '<a:p><a:endParaRPr lang="id-ID"/></a:p>';
-	return `<p:txBody><a:bodyPr anchor="t"/><a:lstStyle/>${paras}</p:txBody>`;
-}
-
-function pptxShape(id: number, name: string, x: number, y: number, cx: number, cy: number, titleText: string, titleSize: number, body?: string): string {
-	const sp = (text: string, size: number) =>
-		`<a:p><a:r><a:rPr lang="id-ID" sz="${size}" b="1" dirty="0"/><a:t>${xmlEsc(text)}</a:t></a:r></a:p>`;
-	return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${xmlEsc(name)}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr wrap="square" anchor="t"/><a:lstStyle/>${sp(titleText, titleSize)}</p:txBody></p:sp>${body ?? ''}`;
-}
-
-export function buildPptx(title: string, src: string): Blob {
-	const slides = planSlides(title, src);
-	const zip = new ZipWriter();
-	const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
-	const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-	const P = 'http://schemas.openxmlformats.org/presentationml/2006/main';
-	const NS = `xmlns:a="${A}" xmlns:r="${R}" xmlns:p="${P}"`;
-	const spTreeHead = `<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>`;
-
-	zip.add(
-		'[Content_Types].xml',
-		`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>${slides
-			.map(
-				(_, i) =>
-					`<Override PartName="/ppt/slides/slide${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`
-			)
-			.join('')}</Types>`
-	);
-	zip.add(
-		'_rels/.rels',
-		`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>`
-	);
-	zip.add(
-		'ppt/presentation.xml',
-		`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentation ${NS}><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst>${slides
-			.map((_, i) => `<p:sldId id="${256 + i}" r:id="rId${i + 2}"/>`)
-			.join('')}</p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>`
-	);
-	zip.add(
-		'ppt/_rels/presentation.xml.rels',
-		`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${R}/slideMaster" Target="slideMasters/slideMaster1.xml"/>${slides
-			.map((_, i) => `<Relationship Id="rId${i + 2}" Type="${R}/slide" Target="slides/slide${i + 1}.xml"/>`)
-			.join('')}</Relationships>`
-	);
-	zip.add(
-		'ppt/slideMasters/slideMaster1.xml',
-		`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sldMaster ${NS}><p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:effectLst/></p:bgPr></p:bg><p:spTree>${spTreeHead}</p:spTree></p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/><p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst></p:sldMaster>`
-	);
-	zip.add(
-		'ppt/slideMasters/_rels/slideMaster1.xml.rels',
-		`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${R}/slideLayout" Target="../slideLayouts/slideLayout1.xml"/><Relationship Id="rId2" Type="${R}/theme" Target="../theme/theme1.xml"/></Relationships>`
-	);
-	zip.add(
-		'ppt/slideLayouts/slideLayout1.xml',
-		`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sldLayout ${NS} type="blank"><p:cSld name="Blank"><p:spTree>${spTreeHead}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>`
-	);
-	zip.add(
-		'ppt/slideLayouts/_rels/slideLayout1.xml.rels',
-		`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${R}/slideMaster" Target="../slideMasters/slideMaster1.xml"/></Relationships>`
-	);
-	zip.add(
-		'ppt/theme/theme1.xml',
-		`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:theme xmlns:a="${A}" name="Tema"><a:themeElements><a:clrScheme name="Tema"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F2937"/></a:dk2><a:lt2><a:srgbClr val="F3F4F6"/></a:lt2><a:accent1><a:srgbClr val="4F7CFF"/></a:accent1><a:accent2><a:srgbClr val="0EA5E9"/></a:accent2><a:accent3><a:srgbClr val="10B981"/></a:accent3><a:accent4><a:srgbClr val="F59E0B"/></a:accent4><a:accent5><a:srgbClr val="8B5CF6"/></a:accent5><a:accent6><a:srgbClr val="EF4444"/></a:accent6><a:hlink><a:srgbClr val="2563EB"/></a:hlink><a:folHlink><a:srgbClr val="7C3AED"/></a:folHlink></a:clrScheme><a:fontScheme name="Tema"><a:majorFont><a:latin typeface="Calibri Light"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="Tema"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements></a:theme>`
-	);
-
-	slides.forEach((s, i) => {
-		const titleShape = pptxShape(2, 'Judul', 457200, 274638, 11277600, 1325563, s.title, 3000);
-		const bodyShape = `<p:sp><p:nvSpPr><p:cNvPr id="3" name="Isi"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="1732281"/><a:ext cx="11277600" cy="4846319"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>${pptxTxBody(s.items)}</p:sp>`;
-		zip.add(
-			`ppt/slides/slide${i + 1}.xml`,
-			`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld ${NS}><p:cSld><p:spTree>${spTreeHead}${titleShape}${bodyShape}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`
-		);
-		zip.add(
-			`ppt/slides/_rels/slide${i + 1}.xml.rels`,
-			`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${R}/slideLayout" Target="../slideLayouts/slideLayout1.xml"/></Relationships>`
-		);
-	});
-	return zip.finish();
-}
-
 // ---- CSV ----
 
 // sel yang diawali = + - @ (atau tab/CR) dibaca Excel/Sheets sebagai rumus —
@@ -599,12 +416,12 @@ export function buildConversationCsv(turns: ChatTurn[]): Blob {
 }
 
 // Ekspor seluruh percakapan (semua pesan user + assistant) ke satu file.
-export function exportConversation(title: string, turns: ChatTurn[], fmt: ExportFormat) {
+export async function exportConversation(title: string, turns: ChatTurn[], fmt: ExportFormat) {
 	const md = conversationMarkdown(title, turns);
 	let blob: Blob;
 	if (fmt === 'md') blob = new Blob([md], { type: MIME.md });
-	else if (fmt === 'docx') blob = buildDocx(title, md);
-	else if (fmt === 'pptx') blob = buildPptx(title, md);
+	else if (fmt === 'docx') blob = await buildReportDocx(title, md);
+	else if (fmt === 'pptx') blob = await buildDeckPptx(title, md);
 	else if (fmt === 'xlsx') blob = buildConversationXlsx(title, turns, md);
 	else blob = buildConversationCsv(turns);
 	download(`${fileBase(title)}.${fmt}`, blob);
@@ -616,36 +433,66 @@ export type DocType = 'pptx' | 'docx' | 'xlsx' | 'csv';
 
 // instruksi per format yang disisipkan sebagai system message agar model
 // menyusun konten yang bisa dikonversi rapi menjadi file
+const DOC_COMMON =
+	'Jawabanmu akan DIKONVERSI OTOMATIS menjadi file oleh aplikasi, jadi tulis HANYA isi dokumen dalam markdown — ' +
+	'tanpa kalimat pembuka ("Berikut…"), tanpa penutup ("Semoga membantu"), tanpa menyebut bahwa ini markdown/file, ' +
+	'tanpa blok ```markdown. Gunakan Bahasa Indonesia baku kecuali pengguna meminta bahasa lain. ' +
+	'Isi harus substantif, spesifik, akurat, dan siap dipakai — bukan kerangka kosong atau placeholder seperti [isi di sini].';
+
 export const DOC_SYSTEM: Record<DocType, string> = {
 	pptx:
-		'Pengguna meminta file presentasi. Susun SELURUH jawabanmu sebagai slide dengan aturan ketat: baris pertama "# <Judul Presentasi>", lalu setiap slide diawali heading "## <Judul Slide>" dan diisi 3-6 poin bullet "- ". Tanpa paragraf panjang, tanpa kalimat pembuka/penutup, tanpa teks di luar struktur slide.',
+		'PERAN: kamu desainer presentasi profesional. ' + DOC_COMMON +
+		'\nSTRUKTUR WAJIB:' +
+		'\n1. Baris 1: "# <Judul Presentasi>" (maks 8 kata). Baris 2: "*<subjudul satu kalimat>*".' +
+		'\n2. Setiap slide diawali "## <Judul Slide>" — judul berupa pesan/insight, bukan label (contoh: "Biaya turun 30% setelah otomasi", bukan "Biaya").' +
+		'\n3. Jumlah slide 8–12 kecuali pengguna menentukan. Alur: pembuka/masalah → isi bertahap → kesimpulan → "## Terima kasih".' +
+		'\n4. Slide isi: 3–5 poin "- ", tiap poin maks 12 kata; boleh sub-poin "  - " (2 spasi). Awali poin dengan **frasa kunci** lalu penjelasan singkat.' +
+		'\nTATA LETAK KHUSUS (pakai minimal 2 jenis agar variatif):' +
+		'\n- Slide angka/statistik: 2–4 poin berformat "- **72%** — penjelasan singkat" (angka/nilai pendek di dalam ** **).' +
+		'\n- Slide perbandingan/data: satu tabel markdown (maks 6 baris × 4 kolom), boleh 1 kalimat pengantar di atasnya.' +
+		'\n- Slide kutipan: satu baris "> kutipan — Nama Tokoh".' +
+		'\n- Slide pembatas bagian: "## <Nama Bagian>" tanpa isi apa pun.' +
+		'\n- Contoh kode (bila topik teknis): satu blok ``` pendek (maks 15 baris) + 2–3 poin penjelasan.' +
+		'\n5. Catatan pembicara (opsional, dianjurkan): di akhir slide tulis paragraf "Catatan pembicara: <apa yang diucapkan>".' +
+		'\nDILARANG: paragraf panjang di slide, lebih dari 6 poin per slide, emoji berlebihan, heading level 3+.',
 	docx:
-		'Pengguna meminta file dokumen. Susun jawaban sebagai dokumen terstruktur: baris pertama "# <Judul Dokumen>", bagian dengan "## <Judul Bagian>", paragraf ringkas, poin penting sebagai bullet "- ", dan tabel markdown bila relevan. Jangan tulis catatan di luar isi dokumen.',
+		'PERAN: kamu penulis laporan profesional. ' + DOC_COMMON +
+		'\nSTRUKTUR WAJIB:' +
+		'\n1. Baris 1: "# <Judul Dokumen>". Baris 2: "*<subjudul/konteks satu kalimat>*". Sampul, daftar isi, nomor halaman, dan penomoran bab dibuat otomatis — JANGAN menulis daftar isi atau nomor bab sendiri.' +
+		'\n2. Bab memakai "## <Judul Bab>", subbab "### <Judul Subbab>". Untuk laporan umumnya: Ringkasan Eksekutif, Pendahuluan/Latar Belakang, (bab inti sesuai topik), Kesimpulan, Rekomendasi. Sesuaikan bila pengguna meminta jenis lain (surat, proposal, notulen, SOP, makalah).' +
+		'\n3. Paragraf utuh 3–5 kalimat, bahasa formal dan jelas. Gunakan **tebal** untuk istilah kunci.' +
+		'\n4. Daftar memakai "- " atau "1. " (langkah berurutan). Data/perbandingan WAJIB dalam tabel markdown dengan header jelas dan satuan.' +
+		'\n5. Kutipan, catatan penting, atau definisi pakai "> ".' +
+		'\n6. Panjang menyesuaikan permintaan; laporan standar 800–1500 kata.' +
+		'\nDILARANG: heading level 4+, HTML, emoji, garis "---", kata "Berikut adalah".',
 	xlsx:
-		'Pengguna meminta file Excel. Sajikan data sebagai satu atau beberapa tabel markdown dengan baris header "| Kol1 | Kol2 |" dan pemisah "|---|---|". Beri heading "## <Nama Tabel>" di atas setiap tabel. Isi sel berupa nilai murni (angka tanpa titik ribuan). Tanpa narasi panjang.',
+		'Pengguna meminta file Excel. ' + DOC_COMMON +
+		' Sajikan data sebagai satu atau beberapa tabel markdown dengan baris header "| Kol1 | Kol2 |" dan pemisah "|---|---|". ' +
+		'Beri heading "## <Nama Sheet>" di atas setiap tabel. Isi sel berupa nilai murni (angka tanpa titik ribuan dan tanpa satuan; satuan ditaruh di header). Tanpa narasi.',
 	csv:
-		'Pengguna meminta file CSV. Sajikan TEPAT SATU tabel markdown dengan baris header dan pemisah "|---|". Isi sel berupa nilai murni tanpa karakter pipe. Tanpa narasi panjang.'
+		'Pengguna meminta file CSV. ' + DOC_COMMON +
+		' Sajikan TEPAT SATU tabel markdown dengan baris header dan pemisah "|---|". Isi sel berupa nilai murni tanpa karakter pipe. Tanpa narasi.'
 };
 
 const DOC_PATTERNS: [RegExp, DocType][] = [
-	[/\b(pptx?|presentasi\w*|slide\w*)\b/i, 'pptx'],
-	[/\b(docx?|dokumen\w*|word)\b/i, 'docx'],
-	[/\b(xlsx?|excel)\b/i, 'xlsx'],
-	[/\bcsv\b/i, 'csv']
+	[/\b(pptx?|power\s*point|presentasi\w*|slide\w*|deck|salindia)\b/i, 'pptx'],
+	[/\b(xlsx?|excel|spreadsheet|lembar\s+kerja)\b/i, 'xlsx'],
+	[/\bcsv\b/i, 'csv'],
+	[/\b(docx?|word|dokumen\w*|laporan|makalah|proposal|notulen|surat|sop|artikel|esai|essay|modul|rpp|report)\b/i, 'docx']
 ];
 
-// Deteksi permintaan pembuatan file dari prompt user (harus ada kata kerja
-// buat + nama format, agar pertanyaan biasa seperti "apa itu ppt" tidak kena).
+// Deteksi permintaan pembuatan file dari prompt user: harus ada kata kerja
+// buat + jenis dokumen, agar pertanyaan biasa ("apa itu ppt") tidak kena.
 export function detectDocRequest(text: string): DocType | null {
-	if (!/buat|bikin|susun|siapkan|generate|create/i.test(text)) return null;
+	if (!/\b(buat\w*|bikin\w*|susun\w*|siapkan|tuliskan|tulis|rancang\w*|generate|create|make|draft\w*)\b/i.test(text)) return null;
 	for (const [re, type] of DOC_PATTERNS) if (re.test(text)) return type;
 	return null;
 }
 
 // Rakit blob file dari konten markdown sesuai tipe dokumen.
-export function buildDocBlob(type: DocType, title: string, content: string): Blob {
-	if (type === 'pptx') return buildPptx(title, content);
-	if (type === 'docx') return buildDocx(title, content);
+export async function buildDocBlob(type: DocType, title: string, content: string): Promise<Blob> {
+	if (type === 'pptx') return buildDeckPptx(title, content);
+	if (type === 'docx') return buildReportDocx(title, content);
 	if (type === 'xlsx') return buildXlsx(title, content);
 	return buildCsv(title, content);
 }
@@ -681,11 +528,11 @@ const MIME: Record<ExportFormat, string> = {
 };
 
 // Ekspor satu jawaban chat ke format yang diminta dan unduh sebagai file.
-export function exportAnswer(title: string, content: string, fmt: ExportFormat) {
+export async function exportAnswer(title: string, content: string, fmt: ExportFormat) {
 	let blob: Blob;
 	if (fmt === 'md') blob = new Blob([content], { type: MIME.md });
-	else if (fmt === 'docx') blob = buildDocx(title, content);
-	else if (fmt === 'pptx') blob = buildPptx(title, content);
+	else if (fmt === 'docx') blob = await buildReportDocx(title, content);
+	else if (fmt === 'pptx') blob = await buildDeckPptx(title, content);
 	else if (fmt === 'xlsx') blob = buildXlsx(title, content);
 	else blob = buildCsv(title, content);
 	download(`${fileBase(title)}.${fmt}`, blob);

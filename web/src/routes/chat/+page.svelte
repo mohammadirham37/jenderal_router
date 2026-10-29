@@ -15,6 +15,7 @@
 		thinkStart?: number; thinkMs?: number; thinkOpen?: boolean; stopped?: boolean;
 		tools?: { name: string; args: string; url?: string }[];
 		file?: { name: string; url: string; size: number; type: DocType };
+		building?: DocType; // dokumen sedang dirakit
 	};
 	type ToolCall = { id: string; name: string; args: string };
 
@@ -72,7 +73,7 @@
 	const SUGGESTIONS = [
 		{ title: 'Ringkas halaman web', text: 'Ringkas isi https://go.dev/doc/ dalam 5 poin' },
 		{ title: 'Buat presentasi', text: 'Buatkan ppt 6 slide tentang manfaat AI untuk UMKM' },
-		{ title: 'Jelaskan konsep', text: 'Jelaskan perbedaan TCP dan UDP dengan tabel' },
+		{ title: 'Buat laporan Word', text: 'Buatkan laporan kegiatan pelatihan AI untuk dosen, lengkap dengan ringkasan eksekutif, tabel peserta, dan rekomendasi' },
 		{ title: 'Tulis kode', text: 'Tulis fungsi Go untuk membaca file CSV dan menghitung rata-rata kolom' }
 	];
 
@@ -212,8 +213,8 @@
 		const first = msgs.find((m) => m.role === 'user')?.content;
 		return first ? first.slice(0, 60) : 'Jawaban';
 	}
-	function doExport(m: Msg, fmt: ExportFormat) {
-		try { exportAnswer(convTitle(), m.content, fmt); }
+	async function doExport(m: Msg, fmt: ExportFormat) {
+		try { await exportAnswer(convTitle(), m.content, fmt); }
 		catch (e: any) { toast('ekspor gagal: ' + e.message, 'err'); }
 	}
 	const CONV_EXPORTS: { fmt: ExportFormat; label: string; hint: string }[] = [
@@ -223,12 +224,12 @@
 		{ fmt: 'xlsx', label: 'XLSX', hint: 'Excel — transkrip + semua tabel' },
 		{ fmt: 'csv', label: 'CSV', hint: 'CSV transkrip (Peran; Pesan)' }
 	];
-	function doExportConv(fmt: ExportFormat) {
+	async function doExportConv(fmt: ExportFormat) {
 		const turns = msgs.filter((m) => m.content && m.role !== 'tool').map((m) => ({ role: m.role, content: m.content, model: m.model }));
 		if (!turns.length) return;
-		try { exportConversation(convTitle(), turns, fmt); }
-		catch (e: any) { toast('ekspor gagal: ' + e.message, 'err'); }
 		showExport = false;
+		try { await exportConversation(convTitle(), turns, fmt); }
+		catch (e: any) { toast('ekspor gagal: ' + e.message, 'err'); }
 	}
 
 	// ---- file jadi: prompt user → dokumen terlampir di jawaban ----
@@ -240,19 +241,35 @@
 		const m = s.match(/^#{1,3}\s+(.+)/m);
 		return m ? m[1].replace(/^#+\s+/, '').trim() : '';
 	}
-	function attachGeneratedFile(type: DocType) {
+	async function attachGeneratedFile(type: DocType) {
 		const bubble = [...msgs].reverse().find((m) => m.role === 'assistant' && m.content.trim());
 		if (!bubble) return;
+		bubble.building = type;
+		scrollToBottom();
 		try {
 			const title = firstH1(bubble.content) || convTitle();
-			const content = bubble.content.replace(/^\s*#{1,3}\s+[^\n]*\n+/, '');
-			const blob = buildDocBlob(type, title, content);
+			// generator membaca judul (#) & subjudul dari markdown untuk sampul/slide judul
+			const blob = await buildDocBlob(type, title, bubble.content);
 			bubble.file = { name: docFileName(title, type), url: URL.createObjectURL(blob), size: blob.size, type };
-			scrollToBottom();
 		} catch (e: any) {
 			toast('gagal merakit file: ' + e.message, 'err');
+		} finally {
+			bubble.building = undefined;
+			scrollToBottom();
 		}
 	}
+
+	// ---- mode "buat file" di composer: otomatis (deteksi dari prompt) atau paksa ----
+	const FILE_MODES: { v: 'auto' | 'none' | DocType; label: string }[] = [
+		{ v: 'auto', label: 'File: otomatis' },
+		{ v: 'docx', label: 'Buat Word' },
+		{ v: 'pptx', label: 'Buat PowerPoint' },
+		{ v: 'xlsx', label: 'Buat Excel' },
+		{ v: 'csv', label: 'Buat CSV' },
+		{ v: 'none', label: 'Tanpa file' }
+	];
+	let fileMode = $state<'auto' | 'none' | DocType>('auto');
+	const DOC_LABEL: Record<DocType, string> = { docx: 'dokumen Word', pptx: 'presentasi PowerPoint', xlsx: 'workbook Excel', csv: 'file CSV' };
 
 	// ---- salin: pesan & blok kode (delegasi klik; HTML jawaban dari md()) ----
 	let copiedIdx = $state(-1);
@@ -303,7 +320,8 @@
 		if (!text || sending) return;
 		sending = true;
 		input = '';
-		const docType = detectDocRequest(text);
+		const docType: DocType | null = fileMode === 'auto' ? detectDocRequest(text) : fileMode === 'none' ? null : fileMode;
+		fileMode = 'auto';
 		if (!current) {
 			try { await newConversation(); }
 			catch (e: any) {
@@ -399,7 +417,7 @@
 				scrollToBottom();
 			}
 			await saveTurn(text);
-			if (docType) attachGeneratedFile(docType);
+			if (docType) await attachGeneratedFile(docType);
 			loadQuota();
 			loadConversations();
 		} catch (e: any) {
@@ -551,6 +569,14 @@
 								{/if}
 								{#if m.stopped}<div class="stopped">Dihentikan</div>{/if}
 
+								{#if m.building}
+									{@const BIcon = FILE_ICONS[m.building]}
+									<div class="file-card building" aria-live="polite">
+										<BIcon size={18} />
+										<span class="grow"><b class="shimmer">Menyusun {DOC_LABEL[m.building]}…</b><small>sampul, tata letak, dan gaya diterapkan otomatis</small></span>
+										<span class="spinner dark"></span>
+									</div>
+								{/if}
 								{#if m.file}
 									{@const FileIcon = FILE_ICONS[m.file.type]}
 									<a class="file-card" href={m.file.url} download={m.file.name}>
@@ -608,6 +634,10 @@
 						{#each models as mo (mo.id)}
 							<option value={mo.id}>{mo.id}{mo.local ? ' · lokal' : ''}</option>
 						{/each}
+					</select>
+					<select bind:value={fileMode} class="model-select file-mode" class:forced={fileMode !== 'auto'} aria-label="Buat file dari jawaban"
+						title="Otomatis: file dibuat bila pesan meminta dokumen/presentasi/excel">
+						{#each FILE_MODES as f (f.v)}<option value={f.v}>{f.label}</option>{/each}
 					</select>
 					<span class="tool-badge" title="Model bisa memanggil web_fetch untuk membaca halaman web"><Globe size={12} /> web</span>
 					<span class="grow"></span>
@@ -816,6 +846,10 @@
 	.file-card small { color: var(--muted); font-size: 11px; }
 	.file-card .grow { min-width: 0; }
 	.file-card .dl { margin-left: auto; color: var(--accent-2); flex-shrink: 0; }
+	.file-card.building { border-style: dashed; cursor: default; }
+	.file-card.building:hover { transform: none; }
+	.file-mode { max-width: 150px; }
+	.file-mode.forced { border-color: var(--accent); color: var(--accent-2); }
 
 	/* ---------- tombol ke bawah ---------- */
 	.jump {
