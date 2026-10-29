@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { Gauge, KeyRound, Copy, Activity, RefreshCw, Bot } from '@lucide/svelte';
-	import { browser } from '$app/environment';
-	import { api, fmtTs } from '$lib/api';
-	import { copyText } from '$lib/clipboard';
-	import { t, toast } from '$lib/stores.svelte';
-	import Stat from '$lib/components/Stat.svelte';
+	import { browser } from '$app/env';
+	import { api, fmtTs } from '#lib/api.js';
+	import { copyText } from '#lib/clipboard.js';
+	import { t, toast } from '#lib/stores.svelte.js';
+	import Stat from '#lib/components/Stat.svelte';
 
 	const origin = browser ? window.location.origin : '';
 	const baseURL = origin + '/v1';
@@ -70,21 +70,29 @@
 		}
 	}
 	async function copyNewKey() {
-		(await copyText(newKeyPlain)) ? toast('key disalin ✓', 'ok') : toast('gagal menyalin — salin manual', 'err');
+		await copyText(newKeyPlain)
+			? toast('key disalin ✓', 'ok')
+			: toast('gagal menyalin — salin manual', 'err');
 	}
 
 	async function copyKey(k: Key) {
 		try {
 			if (revealed[k.id]) {
-				(await copyText(revealed[k.id])) ? toast('key disalin ✓', 'ok') : toast('gagal menyalin', 'err');
+				await copyText(revealed[k.id])
+					? toast('key disalin ✓', 'ok')
+					: toast('gagal menyalin', 'err');
+
 				return;
 			}
 			revealing = k.id;
 			const r = await api.get(`/api/me/keys/${k.id}/reveal`);
 			revealed[k.id] = r.plaintext;
 			revealing = 0;
-			(await copyText(r.plaintext)) ? toast('key disalin ✓', 'ok') : toast('gagal menyalin — salin manual', 'err');
-		} catch (e: any) {
+
+			await copyText(r.plaintext)
+				? toast('key disalin ✓', 'ok')
+				: toast('gagal menyalin — salin manual', 'err');
+		} catch(e: any) {
 			revealing = 0;
 			toast(e.message, 'err');
 		}
@@ -148,9 +156,11 @@
 	}
 	async function copyGuide() {
 		if (!guideSnippet) await buildGuide();
-		(await copyText(guideSnippet)) ? toast('konfigurasi disalin ✓', 'ok') : toast('gagal menyalin', 'err');
-	}
 
+		await copyText(guideSnippet)
+			? toast('konfigurasi disalin ✓', 'ok')
+			: toast('gagal menyalin', 'err');
+	}
 </script>
 
 <svelte:head><title>{t('usage_api')} — JenderalRouter</title></svelte:head>
@@ -218,9 +228,24 @@
 	<div class="card" style="margin-top:14px">
 		<h2><Activity size={15} /> Panduan koneksi</h2>
 		<div class="row" style="margin-bottom:8px">
-			<button class="btn sm" class:ghost={guideTab !== 'opencode'} onclick={() => (guideTab = 'opencode')}>OpenCode</button>
-			<button class="btn sm" class:ghost={guideTab !== 'kilocode'} onclick={() => (guideTab = 'kilocode')}>Kilocode</button>
-			<button class="btn sm" class:ghost={guideTab !== 'curl'} onclick={() => (guideTab = 'curl')}>curl</button>
+			<button
+				class="btn sm"
+				class:ghost={guideTab !== 'opencode'}
+				onclick={() => guideTab = 'opencode'}
+			>OpenCode</button>
+
+			<button
+				class="btn sm"
+				class:ghost={guideTab !== 'kilocode'}
+				onclick={() => guideTab = 'kilocode'}
+			>Kilocode</button>
+
+			<button
+				class="btn sm"
+				class:ghost={guideTab !== 'curl'}
+				onclick={() => guideTab = 'curl'}
+			>curl</button>
+
 			<span class="grow"></span>
 			<button class="btn sm" onclick={buildGuide} disabled={guideBusy}>
 				{#if guideBusy}<span class="spinner"></span>{:else}<KeyRound size={13} />{/if}

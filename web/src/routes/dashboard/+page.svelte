@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { ChartLine, Activity, Coins, AlertTriangle, Hash, Cpu, MemoryStick, HardDrive, Gauge, KeyRound } from '@lucide/svelte';
-	import { api, fmtNum, fmtCost, truncate, fmtTs } from '$lib/api';
-	import { app, t, toast, roleAtLeast } from '$lib/stores.svelte';
-	import Stat from '$lib/components/Stat.svelte';
+	import { api, fmtNum, fmtCost, truncate, fmtTs } from '#lib/api.js';
+	import { app, t, toast, roleAtLeast } from '#lib/stores.svelte.js';
+	import Stat from '#lib/components/Stat.svelte';
 
 	type Summary = {
 		totals: any;

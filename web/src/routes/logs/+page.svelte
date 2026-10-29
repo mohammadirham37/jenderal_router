@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { ScrollText, RefreshCw, Download } from '@lucide/svelte';
-	import { api, fmtCost, fmtTs } from '$lib/api';
-	import { t } from '$lib/stores.svelte';
+	import { api, fmtCost, fmtTs } from '#lib/api.js';
+	import { t } from '#lib/stores.svelte.js';
 
 	let logs = $state<any[]>([]);
 	let loading = $state(true);

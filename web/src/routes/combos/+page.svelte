@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { Link2, Plus, Trash2, X } from '@lucide/svelte';
-	import { api } from '$lib/api';
-	import { t, toast } from '$lib/stores.svelte';
-	import Modal from '$lib/components/Modal.svelte';
+	import { api } from '#lib/api.js';
+	import { t, toast } from '#lib/stores.svelte.js';
+	import Modal from '#lib/components/Modal.svelte';
 
 	let combos = $state<any[]>([]);
 	let models = $state<any[]>([]);
@@ -87,13 +87,13 @@
 
 {#if showAdd}
 	<Modal title={t('combo_name')} onclose={() => (showAdd = false)}>
-		<label>{t('combo_name')}</label>
-		<input bind:value={name} placeholder="coding-hemat" />
-		<label>Deskripsi</label>
-		<input bind:value={desc} placeholder="Sonnet → GLM → lokal" />
-		<label>{t('combos')}: langkah (urut)</label>
+		<label for="f-name">{t('combo_name')}</label>
+		<input id="f-name" bind:value={name} placeholder="coding-hemat" />
+		<label for="f-desc">Deskripsi</label>
+		<input id="f-desc" bind:value={desc} placeholder="Sonnet → GLM → lokal" />
+		<label for="f-combo-step">{t('combos')}: langkah (urut)</label>
 		<div class="row">
-			<select bind:value={steps[steps.length]} style="flex:1" onchange={(e) => { steps.push(Number((e.currentTarget as HTMLSelectElement).value)); steps = steps; }}>
+			<select id="f-combo-step" bind:value={steps[steps.length]} style="flex:1" onchange={(e) => { steps.push(Number((e.currentTarget as HTMLSelectElement).value)); steps = steps; }}>
 				<option value="" disabled selected>pilih model…</option>
 				{#each models as m (m.id)}
 					<option value={m.id}>{m.public_id}</option>

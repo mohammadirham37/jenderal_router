@@ -1,5 +1,6 @@
 // stores.svelte.ts — state global (Svelte 5 runes): saya, bahasa, tema, toast.
-import type { Toast } from './components/Toasts.svelte';
+
+export type Toast = { id: string; msg: string; kind: 'info' | 'ok' | 'err' };
 
 export type Me = {
 	id: number;
@@ -65,7 +66,7 @@ const dict: Record<string, Record<string, string>> = {
 		time: 'Waktu', requested: 'Diminta', provider: 'Provider', latency: 'Latensi',
 		tokens: 'Token', cost: 'Biaya', attempts: 'Percobaan', requests: 'Request', errors: 'Error',
 		per_day: 'Per hari', per_provider: 'Per provider', per_user: 'Per user', user: 'User',
-		model: 'Model', update_now: 'Perbarui sekarang', check_update: 'Cek pembaruan',
+		model: 'Model', system_update: 'Pembaruan', update_now: 'Perbarui sekarang', check_update: 'Cek pembaruan',
 		install: 'Install', confirm_delete: 'Yakin hapus?'
 	},
 	en: {
@@ -95,7 +96,7 @@ const dict: Record<string, Record<string, string>> = {
 		time: 'Time', requested: 'Requested', provider: 'Provider', latency: 'Latency',
 		tokens: 'Tokens', cost: 'Cost', attempts: 'Attempts', requests: 'Requests', errors: 'Errors',
 		per_day: 'Per day', per_provider: 'Per provider', per_user: 'Per user', user: 'User',
-		model: 'Model', update_now: 'Update now', check_update: 'Check for updates',
+		model: 'Model', system_update: 'Updates', update_now: 'Update now', check_update: 'Check for updates',
 		install: 'Install', confirm_delete: 'Delete?'
 	}
 };

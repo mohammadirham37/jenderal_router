@@ -8,7 +8,7 @@ VERSION="${1:-dev}"
 # UI SvelteKit: build bila Node tersedia; otherwise pakai dist yang ter-commit
 if command -v npm >/dev/null 2>&1 && [ -d web ]; then
   echo ">> build UI (SvelteKit)"
-  ( cd web && npm ci --no-audit --no-fund && npm run build )
+  ( cd web && npm ci --no-audit --no-fund && npm run check && npm run build )
   rm -rf internal/web/dist
   cp -r web/build internal/web/dist
 else

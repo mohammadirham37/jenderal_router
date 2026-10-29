@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { ChartLine } from '@lucide/svelte';
-	import { api, fmtNum, fmtCost } from '$lib/api';
-	import { t, toast } from '$lib/stores.svelte';
-	import Stat from '$lib/components/Stat.svelte';
+	import { api, fmtNum, fmtCost } from '#lib/api.js';
+	import { t, toast } from '#lib/stores.svelte.js';
+	import Stat from '#lib/components/Stat.svelte';
 
 	let res = $state<any>(null);
 	let loading = $state(true);

@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { Cable, Plus, Trash2, Gauge, RefreshCw, Play, Pause, X, KeyRound, Zap } from '@lucide/svelte';
-	import { api, truncate } from '$lib/api';
-	import { t, toast } from '$lib/stores.svelte';
-	import Modal from '$lib/components/Modal.svelte';
+	import { api, truncate } from '#lib/api.js';
+	import { t, toast } from '#lib/stores.svelte.js';
+	import Modal from '#lib/components/Modal.svelte';
 
 	type Provider = {
 		id: number; type: string; name: string; prefix: string; base_url: string;
@@ -191,28 +191,28 @@
 			{t('providers')} dari template bawaan
 		</label>
 		{#if useTemplate}
-			<label>{t('providers')}</label>
-			<select bind:value={tplPrefix}>
+			<label for="f-tpl-prefix">{t('providers')}</label>
+			<select id="f-tpl-prefix" bind:value={tplPrefix}>
 				{#each templates as tp (tp.prefix)}
 					<option value={tp.prefix}>{tp.name} ({tp.prefix}/…)</option>
 				{/each}
 			</select>
-			<label>{t('api_key')}</label>
-			<input bind:value={tplKey} placeholder="sk-…" />
+			<label for="f-tpl-key">{t('api_key')}</label>
+			<input id="f-tpl-key" bind:value={tplKey} placeholder="sk-…" />
 		{:else}
-			<label>{t('name')}</label>
-			<input bind:value={cName} placeholder="Provider internal" />
-			<label>{t('prefix')}</label>
-			<input bind:value={cPrefix} placeholder="internal" />
-			<label>Tipe</label>
-			<select bind:value={cType}>
+			<label for="f-c-name">{t('name')}</label>
+			<input id="f-c-name" bind:value={cName} placeholder="Provider internal" />
+			<label for="f-c-prefix">{t('prefix')}</label>
+			<input id="f-c-prefix" bind:value={cPrefix} placeholder="internal" />
+			<label for="f-c-type">Tipe</label>
+			<select id="f-c-type" bind:value={cType}>
 				<option value="openai-compatible">openai-compatible</option>
 				<option value="anthropic">anthropic</option>
 				<option value="gemini">gemini</option>
 				<option value="llamastash">llamastash</option>
 			</select>
-			<label>{t('base_url')}</label>
-			<input bind:value={cURL} placeholder="http://…" />
+			<label for="f-c-u-r-l">{t('base_url')}</label>
+			<input id="f-c-u-r-l" bind:value={cURL} placeholder="http://…" />
 		{/if}
 		<div class="modal-actions">
 			<button class="btn ghost" onclick={() => (showAdd = false)}>{t('cancel')}</button>
@@ -226,10 +226,10 @@
 
 {#if credFor}
 	<Modal title={`${t('add_key')} — ${credFor.name}`} onclose={closeCred}>
-		<label>{t('credentials')}: label</label>
-		<input bind:value={credLabel} placeholder="kunci utama" />
-		<label>{t('api_key')}</label>
-		<input bind:value={credKey} placeholder="sk-…" />
+		<label for="f-cred-label">{t('credentials')}: label</label>
+		<input id="f-cred-label" bind:value={credLabel} placeholder="kunci utama" />
+		<label for="f-cred-key">{t('api_key')}</label>
+		<input id="f-cred-key" bind:value={credKey} placeholder="sk-…" />
 		{#if credFor.type === 'llamastash'}
 			<div class="row" style="margin-top:7px">
 				{#if credFetching}

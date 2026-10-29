@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { X } from '@lucide/svelte';
-	import { app, dismissToast } from '$lib/stores.svelte';
+	import { app, dismissToast } from '#lib/stores.svelte.js';
 </script>
 
 <div class="toasts">

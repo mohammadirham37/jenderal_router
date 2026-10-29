@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { Server, Download, Play, Square, TerminalSquare, RefreshCw } from '@lucide/svelte';
-	import { api } from '$lib/api';
-	import { t, toast } from '$lib/stores.svelte';
-	import Modal from '$lib/components/Modal.svelte';
+	import { api } from '#lib/api.js';
+	import { t, toast } from '#lib/stores.svelte.js';
+	import Modal from '#lib/components/Modal.svelte';
 
 	let status = $state<any>(null);
 	let loading = $state(true);

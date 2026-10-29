@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { fmtNum } from '$lib/api';
+	import { fmtNum } from '#lib/api.js';
 
 	let {
 		icon: Icon,

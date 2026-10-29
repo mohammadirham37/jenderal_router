@@ -28,8 +28,8 @@ function dosDateTime(d: Date): { time: number; date: number } {
 }
 
 class ZipWriter {
-	private chunks: Uint8Array[] = [];
-	private central: Uint8Array[] = [];
+	private chunks: Uint8Array<ArrayBuffer>[] = [];
+	private central: Uint8Array<ArrayBuffer>[] = [];
 	private offset = 0;
 	private count = 0;
 	private when: Date;
@@ -38,7 +38,7 @@ class ZipWriter {
 		this.when = when;
 	}
 
-	add(name: string, content: string | Uint8Array) {
+	add(name: string, content: string | Uint8Array<ArrayBuffer>) {
 		const data = typeof content === 'string' ? new TextEncoder().encode(content) : content;
 		const { time, date } = dosDateTime(this.when);
 		const crc = crc32(data);

@@ -5,14 +5,14 @@
 	import {
 		Satellite, LayoutDashboard, MessageSquare, Cable, BrainCircuit, Link2, Users,
 		ScrollText, ChartLine, Server, Settings, LogOut, Menu, X, PanelLeftClose,
-		PanelLeftOpen, Gauge
+		PanelLeftOpen, Gauge, Rocket
 	} from '@lucide/svelte';
-	import { browser } from '$app/environment';
-	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
-	import LangToggle from '$lib/components/LangToggle.svelte';
-	import { api, setCSRF, resetCSRF, setUnauthorizedHandler } from '$lib/api';
-	import { app, t, toast, roleAtLeast } from '$lib/stores.svelte';
-	import Toasts from '$lib/components/Toasts.svelte';
+	import { browser } from '$app/env';
+	import ThemeToggle from '#lib/components/ThemeToggle.svelte';
+	import LangToggle from '#lib/components/LangToggle.svelte';
+	import { api, setCSRF, resetCSRF, setUnauthorizedHandler } from '#lib/api.js';
+	import { app, t, toast, roleAtLeast } from '#lib/stores.svelte.js';
+	import Toasts from '#lib/components/Toasts.svelte';
 
 	type NavItem = {
 		route: string; icon: any; label: string; min: string; section: string; max?: string;
@@ -30,6 +30,7 @@
 		{ route: '/logs', icon: ScrollText, label: 'logs', min: 'admin', section: 'observabilitas' },
 		{ route: '/analytics', icon: ChartLine, label: 'analytics', min: 'admin', section: 'observabilitas' },
 		{ route: '/local', icon: Server, label: 'local', min: 'admin', section: 'sistem' },
+		{ route: '/update', icon: Rocket, label: 'system_update', min: 'admin', section: 'sistem' },
 		{ route: '/settings', icon: Settings, label: 'settings', min: 'admin', section: 'sistem' }
 	];
 	const sections: Record<string, string> = {
@@ -62,9 +63,9 @@
 				const res = await api.get('/api/me', { noRedirect: true });
 				app.me = res.user;
 				setCSRF(res.csrf);
-				if (page.url.pathname === '/') goto('/dashboard', { replaceState: true });
+				if (page.url.pathname === '/') goto('/dashboard', { replace: true });
 			} catch {
-				goto('/login', { replaceState: true });
+				goto('/login', { replace: true });
 			}
 		})();
 	});
@@ -89,7 +90,11 @@
 {:else if app.me}
 	<div class="shell">
 		{#if menuOpen}
-			<div class="backdrop" onclick={() => (menuOpen = false)} aria-hidden="true"></div>
+			<div
+				class="backdrop"
+				onclick={() => menuOpen = false}
+				aria-hidden="true"
+			></div>
 		{/if}
 		<aside class="sidebar" class:collapsed class:open={menuOpen}>
 			<div class="brand">
@@ -99,7 +104,7 @@
 				<button
 					class="icon-btn"
 					title={collapsed ? 'Perluas sidebar' : 'Ciutkan sidebar'}
-					onclick={() => (collapsed = !collapsed)}
+					onclick={() => collapsed = !collapsed}
 				>
 					{#if collapsed}<PanelLeftOpen size={16} />{:else}<PanelLeftClose size={16} />{/if}
 				</button>
@@ -112,9 +117,9 @@
 						{/if}
 						<a
 							href={item.route}
-							class:active={page.url.pathname === item.route}
+							class:active={page.url.pathname === item.route || page.url.pathname.startsWith(item.route + '/')}
 							title={t(item.label)}
-							onclick={() => (menuOpen = false)}
+							onclick={() => menuOpen = false}
 						>
 							<item.icon size={17} />
 							<span class="nav-label">{t(item.label)}</span>
@@ -139,8 +144,16 @@
 		</aside>
 		<main class="main">
 			<header class="topbar">
-				<button class="icon-btn burger" aria-label="Menu" onclick={() => (menuOpen = !menuOpen)}>
-					{#if menuOpen}<X size={20} />{:else}<Menu size={20} />{/if}
+				<button
+					class="icon-btn burger"
+					aria-label="Menu"
+					onclick={() => menuOpen = !menuOpen}
+				>
+					{#if menuOpen}
+						<X size={20} />
+					{:else}
+						<Menu size={20} />
+					{/if}
 				</button>
 				<span class="brand-mini">
 					<span class="logo"><Satellite size={15} /></span>

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Languages } from '@lucide/svelte';
-	import { app, toggleLang } from '$lib/stores.svelte';
+	import { app, toggleLang } from '#lib/stores.svelte.js';
 </script>
 
 <button class="icon-btn" onclick={toggleLang} title="Bahasa / Language"

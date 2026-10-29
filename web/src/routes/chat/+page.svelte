@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { Plus, Send, Trash2, X, Bot, Sparkles, History, Globe, Activity, Gauge, Download, FileText, File, Presentation, Sheet, Table } from '@lucide/svelte';
-	import { api, md, fmtTs, fmtNum } from '$lib/api';
-	import { exportAnswer, exportConversation, detectDocRequest, DOC_SYSTEM, buildDocBlob, docFileName, type ExportFormat, type DocType } from '$lib/exporters';
-	import { t, toast } from '$lib/stores.svelte';
-	import Modal from '$lib/components/Modal.svelte';
+	import { api, md, fmtTs, fmtNum } from '#lib/api.js';
+	import { exportAnswer, exportConversation, detectDocRequest, DOC_SYSTEM, buildDocBlob, docFileName, type ExportFormat, type DocType } from '#lib/exporters.js';
+	import { t, toast } from '#lib/stores.svelte.js';
+	import Modal from '#lib/components/Modal.svelte';
 
 	type Msg = {
 		role: 'user' | 'assistant' | 'tool'; content: string; provider?: string;
@@ -441,8 +441,9 @@
 					<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 					{@html md(m.content)}
 					{#if m.file}
+						{@const FileIcon = FILE_ICONS[m.file.type]}
 						<a class="file-card" href={m.file.url} download={m.file.name}>
-							<svelte:component this={FILE_ICONS[m.file.type]} size={18} />
+							<FileIcon size={18} />
 							<span class="grow">
 								<b>{m.file.name}</b>
 								<small>{fmtSize(m.file.size)} — {t('file_ready')}</small>

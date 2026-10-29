@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { Satellite, LogIn, ShieldCheck } from '@lucide/svelte';
-	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
-	import LangToggle from '$lib/components/LangToggle.svelte';
-	import { api, setCSRF } from '$lib/api';
-	import { app, t, toast } from '$lib/stores.svelte';
+	import ThemeToggle from '#lib/components/ThemeToggle.svelte';
+	import LangToggle from '#lib/components/LangToggle.svelte';
+	import { api, setCSRF } from '#lib/api.js';
+	import { app, t, toast } from '#lib/stores.svelte.js';
 
 	let needsSetup = $state<boolean | null>(null);
 	let email = $state('');
@@ -33,7 +33,7 @@
 			setCSRF(res.csrf);
 			app.me = res.user;
 			toast(needsSetup ? 'Admin dibuat — selamat datang! 🎉' : 'Selamat datang kembali', 'ok');
-			goto('/dashboard', { replaceState: true });
+			goto('/dashboard', { replace: true });
 		} catch (e: any) {
 			err = e.message;
 		} finally {

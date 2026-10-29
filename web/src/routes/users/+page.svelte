@@ -1,11 +1,23 @@
 <script lang="ts">
-	import { Users, Plus, Trash2, KeyRound, Gauge, Copy, X, Activity, Search } from '@lucide/svelte';
-	import { browser } from '$app/environment';
-	import { api, fmtNum, fmtCost, fmtTs } from '$lib/api';
-	import { copyText } from '$lib/clipboard';
-	import { t, toast } from '$lib/stores.svelte';
-	import Modal from '$lib/components/Modal.svelte';
-	import Stat from '$lib/components/Stat.svelte';
+	import {
+		Users,
+		Plus,
+		Trash2,
+		KeyRound,
+		Gauge,
+		Copy,
+		X,
+		Activity,
+		Search,
+		ChartLine
+	} from '@lucide/svelte';
+
+	import { browser } from '$app/env';
+	import { api, fmtNum, fmtCost, fmtTs } from '#lib/api.js';
+	import { copyText } from '#lib/clipboard.js';
+	import { t, toast } from '#lib/stores.svelte.js';
+	import Modal from '#lib/components/Modal.svelte';
+	import Stat from '#lib/components/Stat.svelte';
 
 	let users = $state<any[]>([]);
 	let keysByUser = $state<Record<number, any[]>>({});
@@ -85,7 +97,9 @@
 		} catch (e: any) { toast(e.message, 'err'); }
 	}
 	async function copyKey() {
-		(await copyText(plaintext)) ? toast('disalin ✓', 'ok') : toast('gagal menyalin — blok teksnya dan salin manual', 'err');
+		await copyText(plaintext)
+			? toast('disalin ✓', 'ok')
+			: toast('gagal menyalin — blok teksnya dan salin manual', 'err');
 	}
 
 	// ---- panduan koneksi klien pihak ketiga ----
@@ -125,7 +139,9 @@
   -d '{"model":"${contohModel}","messages":[{"role":"user","content":"halo"}]}'`;
 	}
 	async function copyGuide() {
-		(await copyText(guideText())) ? toast('konfigurasi disalin ✓', 'ok') : toast('gagal menyalin — salin manual dari kotak konfigurasi', 'err');
+		await copyText(guideText())
+			? toast('konfigurasi disalin ✓', 'ok')
+			: toast('gagal menyalin — salin manual dari kotak konfigurasi', 'err');
 	}
 
 	// salin ulang key dari salinan terenkripsi (key lama tanpa salinan → 409)
@@ -134,8 +150,11 @@
 		try {
 			revealingKey = k.id;
 			const r = await api.get(`/api/admin/keys/${k.id}/reveal`);
-			(await copyText(r.plaintext)) ? toast('key disalin ✓', 'ok') : toast('gagal menyalin', 'err');
-		} catch (e: any) {
+
+			await copyText(r.plaintext)
+				? toast('key disalin ✓', 'ok')
+				: toast('gagal menyalin', 'err');
+		} catch(e: any) {
 			toast(e.message || 'salinan tidak tersedia — buat ulang key', 'err');
 		} finally {
 			revealingKey = 0;
@@ -203,7 +222,7 @@
 			<div class="ucard">
 				<div class="uc-main">
 					<div class="uc-id">
-						<strong>{u.email}</strong>
+						<a class="uc-email" href="/users/{u.id}" title="lihat detail penggunaan"><strong>{u.email}</strong></a>
 						<div class="row" style="margin-top:3px">
 							<span class="badge {u.role === 'super_admin' ? 'err' : 'info'}">{u.role}</span>
 							{#if u.status === 'active'}<span class="badge ok"><span class="dot"></span>active</span>
@@ -243,6 +262,7 @@
 						</div>
 					</div>
 					<div class="uc-actions">
+						<a class="btn ghost sm" href="/users/{u.id}"><ChartLine size={13} /> Detail</a>
 						<button class="btn ghost sm" onclick={() => { qFor = u; loadKeys(u); }}><Gauge size={13} /> {t('quota')}</button>
 						<button class="btn ghost sm" onclick={() => { keyFor = u; plaintext = ''; kName = ''; loadKeys(u); }}><KeyRound size={13} /> {t('api_key')}</button>
 						<button class="btn danger sm" onclick={() => delUser(u)}><Trash2 size={13} /></button>
@@ -256,26 +276,32 @@
 </div>
 
 {#if showUser}
-	<Modal title={t('create_user')} onclose={() => (showUser = false)}>
-		<label>{t('email')}</label>
-		<input bind:value={uEmail} placeholder="budi@unsoed.ac.id" />
-		<label>{t('password')}</label>
-		<input type="password" bind:value={uPass} placeholder="≥12 karakter" />
-		<label>{t('role')}</label>
-		<select bind:value={uRole}>
+	<Modal
+		title={t('create_user')}
+		onclose={() => showUser = false}
+	>
+		<label for="f-u-email">{t('email')}</label>
+		<input id="f-u-email" bind:value={uEmail} placeholder="budi@unsoed.ac.id" />
+		<label for="f-u-pass">{t('password')}</label>
+		<input id="f-u-pass" type="password" bind:value={uPass} placeholder="≥12 karakter" />
+		<label for="f-u-role">{t('role')}</label>
+		<select id="f-u-role" bind:value={uRole}>
 			<option value="member">member</option>
 			<option value="viewer">viewer</option>
 			<option value="admin">admin</option>
 		</select>
 		<div class="modal-actions">
-			<button class="btn ghost" onclick={() => (showUser = false)}>{t('cancel')}</button>
+			<button class="btn ghost" onclick={() => showUser = false}>{t('cancel')}</button>
 			<button class="btn" onclick={createUser}>{t('create_user')}</button>
 		</div>
 	</Modal>
 {/if}
 
 {#if keyFor}
-	<Modal title={`${t('api_key')} — ${keyFor.email}`} onclose={() => (keyFor = null)}>
+	<Modal
+		title={`${t('api_key')} — ${keyFor.email}`}
+		onclose={() => keyFor = null}
+	>
 		{#if plaintext}
 			<div style="padding:10px 12px;border-radius:10px;background:color-mix(in srgb, var(--warn) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn) 40%, transparent);margin-bottom:10px">
 				<span class="small" style="color:var(--warn);font-weight:700">⚠ API key hanya tampil sekali — salin sekarang sebelum menutup!</span>
@@ -291,9 +317,24 @@
 				API kompatibel OpenAI — Base URL: <code class="mono">{baseURL}</code>
 			</p>
 			<div class="row" style="margin-bottom:8px">
-				<button class="btn sm" class:ghost={guideTab !== 'opencode'} onclick={() => (guideTab = 'opencode')}>OpenCode</button>
-				<button class="btn sm" class:ghost={guideTab !== 'kilocode'} onclick={() => (guideTab = 'kilocode')}>Kilocode</button>
-				<button class="btn sm" class:ghost={guideTab !== 'curl'} onclick={() => (guideTab = 'curl')}>curl</button>
+				<button
+					class="btn sm"
+					class:ghost={guideTab !== 'opencode'}
+					onclick={() => guideTab = 'opencode'}
+				>OpenCode</button>
+
+				<button
+					class="btn sm"
+					class:ghost={guideTab !== 'kilocode'}
+					onclick={() => guideTab = 'kilocode'}
+				>Kilocode</button>
+
+				<button
+					class="btn sm"
+					class:ghost={guideTab !== 'curl'}
+					onclick={() => guideTab = 'curl'}
+				>curl</button>
+
 				<span class="grow"></span>
 				<button class="btn ghost sm" onclick={copyGuide}><Copy size={13} /> Salin</button>
 			</div>
@@ -303,19 +344,19 @@
 				Base URL + API Key yang sama.
 			</p>
 		{:else}
-			<label>{t('name')}</label>
-			<input bind:value={kName} placeholder="kunci {keyFor.email.split('@')[0]}" />
-			<label>Model diizinkan</label>
-			<input bind:value={kAllowed} placeholder="* (semua) atau local/Qwen3-30B-A3B-Q6_K, local/GLM-4.7-Flash-Q6_K" />
+			<label for="f-k-name">{t('name')}</label>
+			<input id="f-k-name" bind:value={kName} placeholder="kunci {keyFor.email.split('@')[0]}" />
+			<label for="f-k-allowed">Model diizinkan</label>
+			<input id="f-k-allowed" bind:value={kAllowed} placeholder="* (semua) atau local/Qwen3-30B-A3B-Q6_K, local/GLM-4.7-Flash-Q6_K" />
 			<p class="muted small" style="margin:4px 0 0">format <span class="mono">prefix/model</span>, pisah dengan koma — <span class="mono">*</span> = semua model</p>
 			<div class="row">
 				<div class="grow">
-					<label>RPM (request/menit)</label>
-					<input bind:value={kRpm} placeholder="60" />
+					<label for="f-k-rpm">RPM (request/menit)</label>
+					<input id="f-k-rpm" bind:value={kRpm} placeholder="60" />
 				</div>
 				<div class="grow">
-					<label>TPM (token/menit, 0 = tanpa batas)</label>
-					<input bind:value={kTpm} placeholder="0" />
+					<label for="f-k-tpm">TPM (token/menit, 0 = tanpa batas)</label>
+					<input id="f-k-tpm" bind:value={kTpm} placeholder="0" />
 				</div>
 			</div>
 			<div style="padding:10px 12px;border-radius:10px;background:var(--surface-2);border:1px solid var(--border);margin-top:12px">
@@ -325,29 +366,32 @@
 		{/if}
 		<div class="modal-actions">
 			{#if plaintext}
-				<button class="btn" onclick={() => (keyFor = null)}>Selesai</button>
+				<button class="btn" onclick={() => keyFor = null}>Selesai</button>
 			{:else}
-				<button class="btn ghost" onclick={() => (keyFor = null)}>{t('cancel')}</button>
-				<button class="btn" onclick={createKey}><KeyRound size={14} /> Buat API key</button>
+				<button class="btn ghost" onclick={() => keyFor = null}>{t('cancel')}</button>
+				<button class="btn" onclick={createKey}><KeyRound size={14} />Buat API key</button>
 			{/if}
 		</div>
 	</Modal>
 {/if}
 
 {#if qFor}
-	<Modal title={`${t('quota')} — ${qFor.email}`} onclose={() => (qFor = null)}>
-		<label>Kuota harian — token</label>
-		<input bind:value={qDayTok} placeholder="0 = tanpa batas" />
-		<label>Kuota harian — request</label>
-		<input bind:value={qDayReq} placeholder="0 = tanpa batas" />
-		<label>Kuota harian — biaya (USD)</label>
-		<input bind:value={qDayCost} placeholder="0 = tanpa batas" />
-		<label>Kuota bulanan — token</label>
-		<input bind:value={qMonTok} placeholder="0 = tanpa batas" />
-		<label>Kuota bulanan — biaya (USD)</label>
-		<input bind:value={qMonCost} placeholder="0 = tanpa batas" />
+	<Modal
+		title={`${t('quota')} — ${qFor.email}`}
+		onclose={() => qFor = null}
+	>
+		<label for="f-q-day-tok">Kuota harian — token</label>
+		<input id="f-q-day-tok" bind:value={qDayTok} placeholder="0 = tanpa batas" />
+		<label for="f-q-day-req">Kuota harian — request</label>
+		<input id="f-q-day-req" bind:value={qDayReq} placeholder="0 = tanpa batas" />
+		<label for="f-q-day-cost">Kuota harian — biaya (USD)</label>
+		<input id="f-q-day-cost" bind:value={qDayCost} placeholder="0 = tanpa batas" />
+		<label for="f-q-mon-tok">Kuota bulanan — token</label>
+		<input id="f-q-mon-tok" bind:value={qMonTok} placeholder="0 = tanpa batas" />
+		<label for="f-q-mon-cost">Kuota bulanan — biaya (USD)</label>
+		<input id="f-q-mon-cost" bind:value={qMonCost} placeholder="0 = tanpa batas" />
 		<div class="modal-actions">
-			<button class="btn ghost" onclick={() => (qFor = null)}>{t('cancel')}</button>
+			<button class="btn ghost" onclick={() => qFor = null}>{t('cancel')}</button>
 			<button class="btn" onclick={saveQuota}>{t('save')}</button>
 		</div>
 	</Modal>
@@ -364,6 +408,8 @@
 	.ucard:hover { border-color: var(--border-strong); }
 	.uc-main { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
 	.uc-id { min-width: 240px; }
+	.uc-email { color: inherit; text-decoration: none; }
+	.uc-email:hover { color: var(--accent-2); text-decoration: underline; }
 	.uc-usage { flex: 1; min-width: 260px; }
 	.uc-keys { margin-top: 6px; display: flex; flex-direction: column; }
 	.uc-keys .kv { gap: 8px; }

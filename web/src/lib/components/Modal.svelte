@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { X } from '@lucide/svelte';
-	import { t } from '$lib/stores.svelte';
+	import { t } from '#lib/stores.svelte.js';
 
 	let {
 		title,

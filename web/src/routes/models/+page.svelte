@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { BrainCircuit, Save } from '@lucide/svelte';
-	import { api, fmtNum, truncate } from '$lib/api';
-	import { t, toast } from '$lib/stores.svelte';
+	import { api, fmtNum, truncate } from '#lib/api.js';
+	import { t, toast } from '#lib/stores.svelte.js';
 
 	let models = $state<any[]>([]);
 	let loading = $state(true);
