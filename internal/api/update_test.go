@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -223,5 +224,35 @@ func TestGitLogPending(t *testing.T) {
 	}
 	if got := gitLog(ctx, clone, "origin/main..origin/main", 50); len(got) != 0 {
 		t.Fatalf("rentang kosong = %+v", got)
+	}
+}
+
+// origin mirror yang diubah (mis. oleh service yang disusupi) dipulihkan
+// ke repo resmi sebelum build.
+func TestEnsureOriginURLRestoresOfficialRepo(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git tidak tersedia")
+	}
+	dir := t.TempDir()
+	initTestRepo(t, dir)
+	ctx := context.Background()
+	if err := gitCmd(ctx, dir, "remote", "add", "origin", "https://evil.example/repo.git").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureOriginURL(ctx, dir, &updateJob{}); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := gitCmd(ctx, dir, "config", "--get", "remote.origin.url").Output()
+	if got := strings.TrimSpace(string(out)); got != repoURL {
+		t.Fatalf("origin = %q, mau %q", got, repoURL)
+	}
+}
+
+func TestFileSHA256(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "x")
+	_ = os.WriteFile(p, []byte("abc"), 0o600)
+	got, err := fileSHA256(p)
+	if err != nil || got != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" {
+		t.Fatalf("sha256 = %s, %v", got, err)
 	}
 }

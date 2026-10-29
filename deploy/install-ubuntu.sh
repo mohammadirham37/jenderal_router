@@ -86,10 +86,27 @@ install_binary() {
       | grep -o '"version": *"go[0-9.]*"' | head -1 | grep -oE '[0-9]+\.[0-9.]+' || true)"
     gov="${gov:-1.27.1}"
     echo ">> Memasang Go ${gov} ke /usr/local/go…"
-    curl -fsSL --max-time 300 "https://go.dev/dl/go${gov}.linux-${GOARCH}.tar.gz" -o /tmp/go.tgz
+    local gofile="go${gov}.linux-${GOARCH}.tar.gz" gotmp want got
+    gotmp="$(mktemp -d)"
+    curl -fsSL --max-time 300 "https://go.dev/dl/${gofile}" -o "$gotmp/go.tgz"
+    # verifikasi checksum resmi sebelum diekstrak sebagai root
+    want="$(curl -fsSL --max-time 20 'https://go.dev/dl/?mode=json&include=all' | python3 -c '
+import json, sys
+name = sys.argv[1]
+for rel in json.load(sys.stdin):
+    for f in rel["files"]:
+        if f["filename"] == name:
+            print(f["sha256"]); sys.exit(0)
+' "$gofile" || true)"
+    got="$(sha256sum "$gotmp/go.tgz" | cut -d' ' -f1)"
+    if [[ -z "$want" || "$want" != "$got" ]]; then
+      echo "!! checksum Go tidak cocok (harap: ${want:-tidak diketahui}, dapat: $got) — dibatalkan" >&2
+      rm -rf "$gotmp"
+      exit 1
+    fi
     rm -rf /usr/local/go
-    tar -C /usr/local -xzf /tmp/go.tgz
-    rm -f /tmp/go.tgz
+    tar -C /usr/local -xzf "$gotmp/go.tgz"
+    rm -rf "$gotmp"
     export PATH="/usr/local/go/bin:$PATH"
   fi
   echo ">> Build binary (linux/${GOARCH})…"

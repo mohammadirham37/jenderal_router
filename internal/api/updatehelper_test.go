@@ -10,8 +10,17 @@ import (
 	"testing"
 )
 
+// asHostNotContainer meniru host biasa: test bisa berjalan di dalam Docker
+// (/.dockerenv ada), padahal yang diuji adalah jalur systemd di host.
+func asHostNotContainer(t *testing.T) {
+	old := containerMarkerPath
+	containerMarkerPath = filepath.Join(t.TempDir(), "tidak-ada")
+	t.Cleanup(func() { containerMarkerPath = old })
+}
+
 // jalur apply: unit path systemd (utama) → file permintaan ditulis tanpa sudo.
 func TestApplyViaPathUnit(t *testing.T) {
+	asHostNotContainer(t)
 	tmp := t.TempDir()
 	t.Setenv("JR_DATA_DIR", tmp)
 	unitFile := filepath.Join(tmp, "jenderalrouter-apply.path")
@@ -46,6 +55,7 @@ func TestApplyViaPathUnit(t *testing.T) {
 
 // tanpa mekanisme apa pun → 501 + instruksi pemasangan helper.
 func TestApplyTanpaMekanisme(t *testing.T) {
+	asHostNotContainer(t)
 	tmp := t.TempDir()
 	t.Setenv("JR_DATA_DIR", tmp)
 	oldUnit := applyPathUnitFile
@@ -84,6 +94,7 @@ func TestInstallUpdateHelperNonRoot(t *testing.T) {
 
 // rollback memakai file permintaan berisi "rollback" (dibaca helper root).
 func TestRollbackViaPathUnit(t *testing.T) {
+	asHostNotContainer(t)
 	tmp := t.TempDir()
 	t.Setenv("JR_DATA_DIR", tmp)
 	unitFile := filepath.Join(tmp, "jenderalrouter-apply.path")

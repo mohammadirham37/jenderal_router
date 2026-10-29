@@ -17,12 +17,30 @@ Environment=JR_DATA_DIR=/var/lib/jenderalrouter
 EnvironmentFile=-/etc/default/jenderalrouter
 Restart=always
 RestartSec=3
-# Hardening ringan
+# Hardening — kompatibel dengan update dari dashboard (git, go build, curl),
+# LlamaStash, nvidia-smi, dan pgrep cloudflared. Sengaja TIDAK dipakai:
+# SystemCallFilter (go build), PrivateDevices (GPU), ProtectProc (pgrep),
+# MemoryDenyWriteExecute (JIT CUDA di proses model lokal).
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/jenderalrouter
 PrivateTmp=true
+UMask=0077
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 LimitNOFILE=65536
 
 [Install]

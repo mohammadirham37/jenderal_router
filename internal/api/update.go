@@ -15,8 +15,11 @@ package api
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -299,11 +302,22 @@ func (j *updateJob) ensureGo(ctx context.Context) (string, error) {
 	j.setPhase("memasang Go (sekali saja, ~75 MB)")
 	_ = os.MkdirAll(stageDir(), 0o700) // pastikan direktori ada sebelum unduh
 	arch := runtime.GOARCH
-	url := "https://go.dev/dl/go1.27.1.linux-" + arch + ".tar.gz"
+	want, ok := goToolchainSHA256[arch]
+	if !ok {
+		return "", fmt.Errorf("arsitektur %s tidak didukung untuk unduh Go otomatis", arch)
+	}
+	url := "https://go.dev/dl/" + goToolchainVersion + ".linux-" + arch + ".tar.gz"
 	tgz := filepath.Join(stageDir(), "go.tgz")
 	if err := j.runStreamed(ctx, "curl", "-fsSL", url, "-o", tgz); err != nil {
 		return "", fmt.Errorf("unduh Go gagal: %w", err)
 	}
+	// toolchain ini membangun binary yang lalu dipasang root — wajib cocok
+	// dengan checksum resmi yang dipatok, bukan hanya mengandalkan TLS
+	if got, err := fileSHA256(tgz); err != nil || got != want {
+		_ = os.Remove(tgz)
+		return "", fmt.Errorf("checksum toolchain Go tidak cocok (dapat %s)", got)
+	}
+	j.appendLog("checksum toolchain Go OK (sha256 %s…)", want[:12])
 	_ = os.RemoveAll(toolDir)
 	if err := os.MkdirAll(toolDir, 0o755); err != nil {
 		return "", err
@@ -316,6 +330,38 @@ func (j *updateJob) ensureGo(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("go binary tidak ditemukan setelah ekstrak")
 	}
 	return goBin, nil
+}
+
+// goToolchainVersion + checksum resmi (go.dev/dl/?mode=json) arsip Linux.
+const goToolchainVersion = "go1.27.1"
+
+var goToolchainSHA256 = map[string]string{
+	"amd64": "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445",
+	"arm64": "3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec",
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// ensureOriginURL memaksa remote origin mirror kembali ke repoURL resmi —
+// .git/config mirror bisa diubah user service; build selalu dari repo resmi.
+func ensureOriginURL(ctx context.Context, repo string, j *updateJob) error {
+	out, _ := gitCmd(ctx, repo, "config", "--get", "remote.origin.url").Output()
+	if cur := strings.TrimSpace(string(out)); cur != repoURL {
+		j.appendLog("⚠ remote origin mirror (%q) dikembalikan ke %s", cur, repoURL)
+		return gitCmd(ctx, repo, "remote", "set-url", "origin", repoURL).Run()
+	}
+	return nil
 }
 
 // sudoApplyAvailable memeriksa helper root terpasang & diizinkan sudoers.
@@ -542,6 +588,10 @@ func (a *App) handleSystemUpdate(w http.ResponseWriter, r *http.Request) {
 		dir, err := ensureMirror(ctx, job)
 		if err != nil {
 			fail(err.Error())
+			return
+		}
+		if err := ensureOriginURL(ctx, dir, job); err != nil {
+			fail("memulihkan remote origin gagal: " + err.Error())
 			return
 		}
 		if err := gitFetch(ctx, dir); err != nil {

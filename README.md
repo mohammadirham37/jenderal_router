@@ -293,6 +293,8 @@ Tanpa GPU, jadikan model lokal **langkah terakhir combo**.
 | `JR_TZ` | `Asia/Jakarta` | Zona reset kuota harian/bulanan |
 | `JR_BACKUP_ENABLED` / `JR_BACKUP_HOUR` | `true` / `3` | Backup harian otomatis (retensi 7) |
 | `JR_SESSION_TTL` | `24h` | Masa berlaku sesi dashboard |
+| `JR_TRUSTED_PROXIES` | — (loopback selalu dipercaya) | CIDR/IP proxy tambahan (pisah koma) yang header `X-Forwarded-For`-nya dipercaya |
+| `JR_LOG_RETENTION_DAYS` | `0` (simpan selamanya) | Hapus `request_logs` lebih tua dari N hari |
 
 ## Operasi
 

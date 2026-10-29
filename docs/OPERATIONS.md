@@ -24,6 +24,22 @@ rotasi key, dan pemecahan masalah umum.
    provider.
 8. **`JR_LOG_PROMPTS`** tetap `false` di produksi; aktifkan hanya sementara
    untuk debugging.
+9. **Proxy tepercaya.** `X-Forwarded-For` hanya dibaca bila koneksi datang dari
+   loopback (Caddy/cloudflared di host yang sama) atau CIDR di
+   `JR_TRUSTED_PROXIES`, dan dibaca dari entri paling kanan. Bila reverse proxy
+   ada di mesin lain, isi `JR_TRUSTED_PROXIES` dengan IP-nya — tanpa itu semua
+   klien terlihat ber-IP proxy (rate limit login berlaku bersama).
+10. **Header keamanan** (CSP, X-Frame-Options, nosniff, Referrer-Policy)
+    dikirim aplikasi sendiri, jadi tetap berlaku tanpa Caddy.
+11. **RBAC.** Admin biasa hanya bisa mengelola user/key/kuota/chat milik
+    member & viewer; super_admin aktif terakhir tidak bisa diturunkan atau
+    dihapus; wizard `/api/setup` tertutup permanen setelah instalasi.
+12. **Unit systemd ter-hardening.** Instalasi lama memakai unit lama; pasang
+    versi baru sekali:
+    `sudo install -m 0644 deploy/jenderalrouter.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart jenderalrouter`.
+13. **Kanal model.** Halaman Model → centang **Chat** / **API** per model:
+    model yang dimatikan untuk API hilang dari `/v1/models` dan ditolak di
+    `/v1`; yang dimatikan untuk chat hilang dari menu Chat.
 
 ## 2. Backup & restore
 
@@ -118,11 +134,19 @@ Perhatian: fallback streaming hanya terjadi **sebelum token pertama**
     (root) memicu `jenderalrouter-apply.service` yang menjalankan
     `apply-update.sh` — penting karena unit service memakai
     `NoNewPrivileges=true` (sudo mustahil dari dalam service); sudoers
-    NOPASSWD tetap dipasang sebagai fallback host non-systemd.
-    Helper membackup binary lama ke `<data>/updates/jenderalrouter.bak`,
-    memasang yang baru, lalu memeriksa kesehatan (`systemctl is-active` +
-    `GET /healthz`). Gagal sehat → binary lama dipulihkan otomatis. Hasilnya
-    ditulis ke `<data>/updates/apply-result.json` dan tampil di dashboard.
+    NOPASSWD hanya dipasang di host tanpa systemd (sisa instalasi lama
+    dihapus otomatis saat `install-update-helper` dijalankan ulang).
+    Toolchain Go yang diunduh otomatis diverifikasi terhadap checksum
+    resmi yang dipatok, dan remote `origin` mirror selalu dikembalikan ke
+    repo resmi sebelum build.
+    Helper membackup binary lama ke `/var/lib/jenderalrouter-apply/
+    jenderalrouter.bak` (folder milik root), memasang yang baru, lalu
+    memeriksa kesehatan (`systemctl is-active` + `GET /healthz`). Gagal sehat
+    → binary lama dipulihkan otomatis. Hasilnya (dengan id permintaan) ditulis
+    ke `/var/lib/jenderalrouter-apply/apply-result.json` dan tampil di
+    dashboard. File dari `<data>/updates/` (milik user service) dipindah ke
+    folder root lalu ditolak bila berupa symlink; unit apply berjalan dengan
+    `ProtectSystem=strict` dan hanya boleh menulis `/usr/local/bin`.
   - Tombol **Kembalikan versi sebelumnya** (`POST
     /api/admin/system/update/rollback`) memasang binary backup; versi yang
     sedang berjalan menjadi backup baru (bisa maju lagi).
