@@ -741,6 +741,57 @@ func (a *App) handleUsersUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"days": days, "per_user": res.PerUser})
 }
 
+// handleUserUsageDetail rincian pemakaian satu user (halaman detail user):
+// agregat per hari/model/key, kuota, daftar key, dan log terbaru.
+func (a *App) handleUserUsageDetail(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	u, err := a.st.GetUser(id)
+	if err != nil {
+		writeJSON(w, 404, map[string]string{"error": "user tidak ada"})
+		return
+	}
+	days := 30
+	if d, err := strconv.Atoi(r.URL.Query().Get("days")); err == nil && d > 0 && d <= 365 {
+		days = d
+	}
+	now := time.Now()
+	from := now.AddDate(0, 0, -days)
+	detail, err := usage.GetUserDetail(a.st, id, from, now.Add(time.Minute))
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	quotas, err := a.st.ListQuotasByScope("user", id)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if quotas == nil {
+		quotas = []*store.Quota{}
+	}
+	keys, err := a.st.ListKeysByUser(id)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if keys == nil {
+		keys = []*store.APIKey{}
+	}
+	logs, err := a.queryLogs(from.UTC().Format(time.RFC3339), now.Add(time.Minute).UTC().Format(time.RFC3339),
+		fmtInt(id), "", "", 50)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"user": u.Public(), "days": days, "usage": detail,
+		"quotas": quotas, "keys": keys, "recent_logs": logs,
+	})
+}
+
 func (a *App) handleListKeys(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {

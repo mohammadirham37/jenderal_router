@@ -287,6 +287,33 @@ func TestLogsAndAnalyticsEndpoints(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"totals"`) {
 		t.Fatalf("analytics = %s", w.Body.String())
 	}
+	// detail pemakaian per user
+	dev, err := st.GetUserByEmail("dev@test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = dashReq(app, "GET", "/api/admin/users/"+fmtInt(dev.ID)+"/usage?days=1", nil, cookie, "")
+	if w.Code != 200 {
+		t.Fatalf("user usage: %d %s", w.Code, w.Body.String())
+	}
+	var detail struct {
+		User  struct{ Email string } `json:"user"`
+		Usage struct {
+			Totals   struct{ Requests int64 } `json:"totals"`
+			PerModel []struct{ Model string } `json:"per_model"`
+		} `json:"usage"`
+		Keys       []any `json:"keys"`
+		RecentLogs []any `json:"recent_logs"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &detail)
+	if detail.User.Email != "dev@test" || detail.Usage.Totals.Requests != 1 ||
+		len(detail.Usage.PerModel) != 1 || detail.Usage.PerModel[0].Model != "mk/mock-model" ||
+		len(detail.Keys) != 1 || len(detail.RecentLogs) != 1 {
+		t.Fatalf("detail = %s", w.Body.String())
+	}
+	if w = dashReq(app, "GET", "/api/admin/users/99999/usage", nil, cookie, ""); w.Code != 404 {
+		t.Fatalf("user tak ada harus 404: %d", w.Code)
+	}
 }
 
 func TestAuditRecorded(t *testing.T) {
