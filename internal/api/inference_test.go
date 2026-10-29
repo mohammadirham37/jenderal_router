@@ -557,6 +557,9 @@ func TestModelChannelsChatVsAPI(t *testing.T) {
 	if w := dashReq(app, "GET", "/api/me/models", nil, cookie, ""); !strings.Contains(w.Body.String(), "mk/mock-model") {
 		t.Fatalf("chat harus tetap punya model: %s", w.Body.String())
 	}
+	if w := dashReq(app, "GET", "/api/me/api-models", nil, cookie, ""); strings.Contains(w.Body.String(), "mk/mock-model") {
+		t.Fatalf("panduan API tidak boleh menawarkan model API-off: %s", w.Body.String())
+	}
 
 	// matikan chat, nyalakan API lagi (per model)
 	w = dashReq(app, "PATCH", "/api/admin/models/"+fmtInt(m.ID), map[string]any{"chat_enabled": false, "api_enabled": true}, cookie, csrf)
@@ -572,6 +575,9 @@ func TestModelChannelsChatVsAPI(t *testing.T) {
 	}
 	if w := doJSON(t, h, "POST", "/v1/chat/completions", key, inferBody("mk/mock-model", false)); w.Code != 200 {
 		t.Fatalf("/v1 setelah API dinyalakan = %d %s", w.Code, w.Body.String())
+	}
+	if w := dashReq(app, "GET", "/api/me/api-models", nil, cookie, ""); !strings.Contains(w.Body.String(), "mk/mock-model") {
+		t.Fatalf("model API-on harus ada di panduan: %s", w.Body.String())
 	}
 }
 

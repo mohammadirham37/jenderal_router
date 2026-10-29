@@ -18,6 +18,7 @@
 	import { t, toast } from '#lib/stores.svelte.js';
 	import Modal from '#lib/components/Modal.svelte';
 	import Stat from '#lib/components/Stat.svelte';
+	import ApiGuide from '#lib/components/ApiGuide.svelte';
 
 	let users = $state<any[]>([]);
 	let keysByUser = $state<Record<number, any[]>>({});
@@ -82,9 +83,7 @@
 	let keyFor = $state<any>(null);
 	let kName = $state(''); let kAllowed = $state('*'); let kRpm = $state('60'); let kTpm = $state('0');
 	let plaintext = $state('');
-	let guideTab = $state<'opencode' | 'kilocode' | 'curl'>('opencode');
 	const baseURL = (browser ? window.location.origin : '') + '/v1';
-	const contohModel = 'local/Qwen3-30B-A3B-Q6_K';
 
 	async function createKey() {
 		if (!keyFor) return;
@@ -100,48 +99,6 @@
 		await copyText(plaintext)
 			? toast('disalin ✓', 'ok')
 			: toast('gagal menyalin — blok teksnya dan salin manual', 'err');
-	}
-
-	// ---- panduan koneksi klien pihak ketiga ----
-	function guideText(): string {
-		const key = plaintext || 'sk-…';
-		if (guideTab === 'opencode') {
-			return JSON.stringify(
-				{
-					$schema: 'https://opencode.ai/config.json',
-					provider: {
-						jenderal: {
-							npm: '@ai-sdk/openai-compatible',
-							name: 'JenderalRouter (lokal)',
-							options: { baseURL, apiKey: key },
-							models: { [contohModel]: { name: 'Qwen3 30B (lokal)' } }
-						}
-					}
-				},
-				null,
-				2
-			);
-		}
-		if (guideTab === 'kilocode') {
-			return [
-				'Provider  : OpenAI Compatible',
-				'Base URL  : ' + baseURL,
-				'API Key   : ' + key,
-				'Model ID  : ' + contohModel,
-				'',
-				'(buka pengaturan Kilocode → pilih provider "OpenAI Compatible"',
-				' → isi kolom di atas → simpan → pilih model tersebut di chat)'
-			].join('\n');
-		}
-		return `curl ${baseURL}/chat/completions \\
-  -H "Authorization: Bearer ${key}" \\
-  -H "Content-Type: application/json" \\
-  -d '{"model":"${contohModel}","messages":[{"role":"user","content":"halo"}]}'`;
-	}
-	async function copyGuide() {
-		await copyText(guideText())
-			? toast('konfigurasi disalin ✓', 'ok')
-			: toast('gagal menyalin — salin manual dari kotak konfigurasi', 'err');
 	}
 
 	// salin ulang key dari salinan terenkripsi (key lama tanpa salinan → 409)
@@ -299,6 +256,7 @@
 
 {#if keyFor}
 	<Modal
+		wide={!!plaintext}
 		title={`${t('api_key')} — ${keyFor.email}`}
 		onclose={() => keyFor = null}
 	>
@@ -312,37 +270,8 @@
 			</div>
 
 			<div style="border-top:1px solid var(--border);margin:16px 0 12px"></div>
-			<div class="small" style="font-weight:700;margin-bottom:2px">Cara pakai di aplikasi lain</div>
-			<p class="muted small" style="margin:0 0 8px">
-				API kompatibel OpenAI — Base URL: <code class="mono">{baseURL}</code>
-			</p>
-			<div class="row" style="margin-bottom:8px">
-				<button
-					class="btn sm"
-					class:ghost={guideTab !== 'opencode'}
-					onclick={() => guideTab = 'opencode'}
-				>OpenCode</button>
-
-				<button
-					class="btn sm"
-					class:ghost={guideTab !== 'kilocode'}
-					onclick={() => guideTab = 'kilocode'}
-				>Kilocode</button>
-
-				<button
-					class="btn sm"
-					class:ghost={guideTab !== 'curl'}
-					onclick={() => guideTab = 'curl'}
-				>curl</button>
-
-				<span class="grow"></span>
-				<button class="btn ghost sm" onclick={copyGuide}><Copy size={13} /> Salin</button>
-			</div>
-			<pre class="logbox" style="max-height:280px;overflow:auto">{guideText()}</pre>
-			<p class="muted small" style="margin:8px 0 0">
-				Klien OpenAI-compatible lain (Cline, Roo Code, Cherry Studio, dll) tinggal diisi
-				Base URL + API Key yang sama.
-			</p>
+			<div class="small" style="font-weight:700;margin-bottom:10px">Cara menghubungkan aplikasi — bagikan ke {keyFor.email}</div>
+			<ApiGuide keyPrefix={plaintext.slice(0, 8)} getKey={() => Promise.resolve(plaintext)} />
 		{:else}
 			<label for="f-k-name">{t('name')}</label>
 			<input id="f-k-name" bind:value={kName} placeholder="kunci {keyFor.email.split('@')[0]}" />
@@ -361,7 +290,7 @@
 			</div>
 			<div style="padding:10px 12px;border-radius:10px;background:var(--surface-2);border:1px solid var(--border);margin-top:12px">
 				<div class="small" style="font-weight:700;margin-bottom:2px">API kompatibel OpenAI</div>
-				<div class="muted small">Base URL: <code class="mono">{baseURL}</code> — panduan koneksi (OpenCode, Kilocode, curl) tampil setelah key dibuat.</div>
+				<div class="muted small">Base URL: <code class="mono">{baseURL}</code> — panduan koneksi langkah demi langkah tampil setelah key dibuat.</div>
 			</div>
 		{/if}
 		<div class="modal-actions">

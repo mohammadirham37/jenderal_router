@@ -1,14 +1,14 @@
 <script lang="ts">
-	import { Gauge, KeyRound, Copy, Activity, RefreshCw, Bot } from '@lucide/svelte';
+	import { Gauge, KeyRound, Copy, Activity, RefreshCw, Bot, Plug } from '@lucide/svelte';
 	import { browser } from '$app/env';
 	import { api, fmtTs } from '#lib/api.js';
 	import { copyText } from '#lib/clipboard.js';
 	import { t, toast } from '#lib/stores.svelte.js';
 	import Stat from '#lib/components/Stat.svelte';
+	import ApiGuide from '#lib/components/ApiGuide.svelte';
 
 	const origin = browser ? window.location.origin : '';
 	const baseURL = origin + '/v1';
-	const contohModel = 'local/Qwen3-30B-A3B-Q6_K';
 
 	type Key = {
 		id: number; prefix: string; name: string; revoked_at: string;
@@ -21,9 +21,6 @@
 	let loading = $state(true);
 	let revealing = $state(0);
 	let revealed = $state<Record<number, string>>({});
-	let guideKey = $state<number | 'manual'>('manual');
-	let manualKey = $state('');
-	let guideTab = $state<'opencode' | 'kilocode' | 'curl'>('opencode');
 	// key baru hasil generate — plaintext hanya tampil sekali
 	let newKeyPlain = $state('');
 	let newKeyId = $state<number | null>(null);
@@ -59,7 +56,6 @@
 			newKeyPlain = r.plaintext;
 			newKeyId = r.key.id;
 			revealed[r.key.id] = r.plaintext;
-			selectedKeyId = r.key.id;
 			const res = await api.get('/api/me/keys');
 			keys = res.keys || [];
 			toast('API key berhasil dibuat ✓', 'ok');
@@ -98,68 +94,16 @@
 		}
 	}
 
-	// key aktif untuk panduan koneksi
-	const guideKeys = $derived(activeKeys.filter((k) => k.has_secret));
-	let selectedKeyId = $state<number | null>(null);
-	$effect(() => {
-		if (guideKeys.length && selectedKeyId === null) selectedKeyId = guideKeys[0].id;
-	});
-
-	async function guideKeyText(): Promise<string> {
-		if (selectedKeyId) {
-			if (!revealed[selectedKeyId]) {
-				const r = await api.get(`/api/me/keys/${selectedKeyId}/reveal`);
-				revealed[selectedKeyId] = r.plaintext;
-			}
-			return revealed[selectedKeyId];
+	// key aktif untuk panduan koneksi (yang punya salinan terenkripsi)
+	const guideKey = $derived(activeKeys.find((k) => k.has_secret) ?? null);
+	async function guideGetKey(): Promise<string> {
+		const k = guideKey;
+		if (!k) throw new Error('belum ada API key aktif');
+		if (!revealed[k.id]) {
+			const r = await api.get(`/api/me/keys/${k.id}/reveal`);
+			revealed[k.id] = r.plaintext;
 		}
-		return manualKey || 'sk-… (tempel key Anda di atas)';
-	}
-
-	function shortModel(m: string): string {
-		return m.split('/').pop()?.replace(/\.gguf$/i, '') || m;
-	}
-
-	let guideSnippet = $state('');
-	let guideBusy = $state(false);
-	async function buildGuide() {
-		guideBusy = true;
-		const key = await guideKeyText();
-		const model = contohModel;
-		if (guideTab === 'opencode') {
-			guideSnippet = JSON.stringify(
-				{
-					$schema: 'https://opencode.ai/config.json',
-					provider: {
-						jenderal: {
-							npm: '@ai-sdk/openai-compatible',
-							name: 'JenderalRouter (lokal)',
-							options: { baseURL, apiKey: key },
-							models: { [model]: { name: 'Qwen3 30B (lokal)' } }
-						}
-					}
-				},
-				null,
-				2
-			);
-		} else if (guideTab === 'kilocode') {
-			guideSnippet = [
-				'Provider  : OpenAI Compatible',
-				'Base URL  : ' + baseURL,
-				'API Key   : ' + key,
-				'Model ID  : ' + model
-			].join('\n');
-		} else {
-			guideSnippet = `curl ${baseURL}/chat/completions \\\n  -H "Authorization: Bearer ${key}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"${model}","messages":[{"role":"user","content":"halo"}]}'`;
-		}
-		guideBusy = false;
-	}
-	async function copyGuide() {
-		if (!guideSnippet) await buildGuide();
-
-		await copyText(guideSnippet)
-			? toast('konfigurasi disalin ✓', 'ok')
-			: toast('gagal menyalin', 'err');
+		return revealed[k.id];
 	}
 </script>
 
@@ -226,47 +170,8 @@
 	</div>
 
 	<div class="card" style="margin-top:14px">
-		<h2><Activity size={15} /> Panduan koneksi</h2>
-		<div class="row" style="margin-bottom:8px">
-			<button
-				class="btn sm"
-				class:ghost={guideTab !== 'opencode'}
-				onclick={() => guideTab = 'opencode'}
-			>OpenCode</button>
-
-			<button
-				class="btn sm"
-				class:ghost={guideTab !== 'kilocode'}
-				onclick={() => guideTab = 'kilocode'}
-			>Kilocode</button>
-
-			<button
-				class="btn sm"
-				class:ghost={guideTab !== 'curl'}
-				onclick={() => guideTab = 'curl'}
-			>curl</button>
-
-			<span class="grow"></span>
-			<button class="btn sm" onclick={buildGuide} disabled={guideBusy}>
-				{#if guideBusy}<span class="spinner"></span>{:else}<KeyRound size={13} />{/if}
-				Isi dengan key saya
-			</button>
-			<button class="btn ghost sm" onclick={copyGuide} disabled={!guideSnippet}><Copy size={13} /> Salin</button>
-		</div>
-		{#if guideKeys.length === 0}
-			<div class="kv small" style="margin-bottom:8px">
-				<span class="muted">Belum ada key yang bisa dipakai — isi manual:</span>
-				<input style="max-width:380px" bind:value={manualKey} placeholder="tempel API key Anda (sk-…)" />
-			</div>
-		{/if}
-		{#if guideSnippet}
-			<pre class="logbox" style="max-height:300px;overflow:auto">{guideSnippet}</pre>
-		{:else}
-			<p class="muted small" style="margin:0">
-				Klik "Isi dengan key saya" untuk membuat konfigurasi siap-tempel
-				(endpoint: <span class="mono">{baseURL}</span>).
-			</p>
-		{/if}
+		<h2><Plug size={15} /> Cara menghubungkan aplikasi</h2>
+		<ApiGuide keyPrefix={guideKey?.prefix ?? ''} getKey={guideGetKey} onGenerate={generateKey} {generating} />
 	</div>
 
 	<div class="card" style="margin-top:14px">

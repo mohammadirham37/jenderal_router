@@ -101,6 +101,7 @@ func (a *App) routesDashboard() {
 
 	// playground: model, chat streaming, kuota (F-12)
 	a.mux.HandleFunc("GET /api/me/models", a.requireSession(a.handleMeModels, store.RoleMember, false))
+	a.mux.HandleFunc("GET /api/me/api-models", a.requireSession(a.handleMeAPIModels, store.RoleMember, false))
 	a.mux.HandleFunc("POST /api/me/chat", a.requireSession(a.handleMeChat, store.RoleMember, true))
 	a.mux.HandleFunc("GET /api/me/usage", a.requireSession(a.handleMeUsage, store.RoleMember, false))
 	a.mux.HandleFunc("GET /api/me/keys", a.requireSession(a.handleMeKeys, store.RoleMember, false))

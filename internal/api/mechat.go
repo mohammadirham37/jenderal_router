@@ -79,6 +79,37 @@ func (a *App) handleMeUsage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleMeAPIModels daftar model + combo yang bisa dipanggil lewat API /v1
+// (kanal API aktif) — untuk panduan koneksi, agar contoh konfigurasi selalu
+// memakai model yang benar-benar ada.
+func (a *App) handleMeAPIModels(w http.ResponseWriter, r *http.Request) {
+	models, err := a.st.ListEnabledModels()
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	type entry struct {
+		ID    string `json:"id"`
+		Kind  string `json:"kind"` // model|combo
+		Owner string `json:"owner"`
+		Local bool   `json:"local"`
+	}
+	out := []entry{}
+	for _, m := range models {
+		if m.APIEnabled {
+			out = append(out, entry{ID: modelDisplayID(m), Kind: "model", Owner: m.ProviderName, Local: m.ProviderType == "llamastash"})
+		}
+	}
+	if combos, err := a.st.ListCombos(); err == nil {
+		for _, c := range combos {
+			if _, err := a.resolver.Resolve(c.Name); err == nil {
+				out = append(out, entry{ID: c.Name, Kind: "combo", Owner: "combo"})
+			}
+		}
+	}
+	writeJSON(w, 200, map[string]any{"models": out})
+}
+
 // handleSaveMessage menyimpan pesan riwayat percakapan (FR-7.2).
 func (a *App) handleSaveMessage(w http.ResponseWriter, r *http.Request) {
 	ai := authFrom(r)
