@@ -96,6 +96,7 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("GET /api/admin/logs", a.requireSession(a.handleListLogs, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/logs/export.csv", a.requireSession(a.handleExportLogs, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/analytics/summary", a.requireSession(a.handleAnalyticsSummary, store.RoleAdmin, false))
+	a.mux.HandleFunc("GET /api/admin/analytics/top-users", a.requireSession(a.handleTopUsers, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/audit", a.requireSession(a.handleListAudit, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/settings", a.requireSession(a.handleGetSettings, store.RoleAdmin, false))
 	a.mux.HandleFunc("PUT /api/admin/settings", a.requireSession(a.handlePutSettings, store.RoleSuperAdmin, true))

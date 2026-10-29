@@ -311,6 +311,24 @@ func TestLogsAndAnalyticsEndpoints(t *testing.T) {
 		len(detail.Keys) != 1 || len(detail.RecentLogs) != 1 {
 		t.Fatalf("detail = %s", w.Body.String())
 	}
+	// top user: request via API key → api_requests, filter model
+	w = dashReq(app, "GET", "/api/admin/analytics/top-users?days=1&model=mk/mock-model", nil, cookie, "")
+	var top struct {
+		Models []struct{ Model string } `json:"models"`
+		Users  []struct {
+			Email       string `json:"email"`
+			APIRequests int64  `json:"api_requests"`
+		} `json:"users"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &top)
+	if w.Code != 200 || len(top.Models) != 1 || len(top.Users) != 1 ||
+		top.Users[0].Email != "dev@test" || top.Users[0].APIRequests != 1 {
+		t.Fatalf("top-users = %d %s", w.Code, w.Body.String())
+	}
+	w = dashReq(app, "GET", "/api/admin/analytics/top-users?model=tidak/ada", nil, cookie, "")
+	if !strings.Contains(w.Body.String(), `"users":[]`) {
+		t.Fatalf("filter model tak dipakai harus kosong: %s", w.Body.String())
+	}
 	if w = dashReq(app, "GET", "/api/admin/users/99999/usage", nil, cookie, ""); w.Code != 404 {
 		t.Fatalf("user tak ada harus 404: %d", w.Code)
 	}

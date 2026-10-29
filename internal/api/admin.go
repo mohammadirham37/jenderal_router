@@ -994,6 +994,27 @@ func (a *App) handleAnalyticsSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, res)
 }
 
+// handleTopUsers user paling sering memakai AI (chat dashboard + API) untuk
+// halaman Ringkasan; ?model= menyaring ke satu model.
+func (a *App) handleTopUsers(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	days, _ := strconv.Atoi(q.Get("days"))
+	if days <= 0 || days > 365 {
+		days = 7
+	}
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	if limit <= 0 || limit > 100 {
+		limit = 10
+	}
+	now := time.Now()
+	res, err := usage.GetTopUsers(a.st, now.AddDate(0, 0, -days), now.Add(time.Minute), q.Get("model"), limit)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"days": days, "model": q.Get("model"), "models": res.Models, "users": res.Users})
+}
+
 func (a *App) handleListAudit(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	entries, err := a.st.ListAudit(limit)

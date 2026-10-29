@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChartLine, Activity, Coins, AlertTriangle, Hash, Cpu, MemoryStick, HardDrive, Gauge, KeyRound } from '@lucide/svelte';
+	import { ChartLine, Activity, Coins, AlertTriangle, Hash, Cpu, MemoryStick, HardDrive, Gauge, KeyRound, Trophy, MessageSquare, Plug } from '@lucide/svelte';
 	import { api, fmtNum, fmtCost, truncate, fmtTs } from '#lib/api.js';
 	import { app, t, toast, roleAtLeast } from '#lib/stores.svelte.js';
 	import Stat from '#lib/components/Stat.svelte';
@@ -59,6 +59,21 @@
 		const id = setInterval(load, 3000);
 		return () => clearInterval(id);
 	});
+
+	// ---- user paling aktif (chat + API), filter per model ----
+	let topModel = $state('');
+	let top = $state<any>(null);
+	let topLoading = $state(false);
+	$effect(() => {
+		if (!isAdmin) return;
+		const m = topModel;
+		topLoading = true;
+		api.get('/api/admin/analytics/top-users?days=7&limit=10' + (m ? '&model=' + encodeURIComponent(m) : ''))
+			.then((r) => (top = r))
+			.catch((e) => toast(e.message, 'err'))
+			.finally(() => (topLoading = false));
+	});
+	const topMax = $derived(Math.max(1, ...((top?.users ?? []) as any[]).map((u) => u.requests)));
 
 	const today = $derived(res?.per_day?.[res.per_day.length - 1] ?? {});
 	const maxReq = $derived(Math.max(1, ...(res?.per_day ?? []).map((d: any) => d.requests)));
@@ -198,6 +213,59 @@
 	</div>
 
 	<div class="card" style="margin-top:14px">
+		<div class="kv" style="margin-bottom:10px">
+			<h2 style="margin:0"><Trophy size={16} /> User paling aktif</h2>
+			<span class="grow"></span>
+			<label for="f-top-model" class="muted small" style="margin:0">Model</label>
+			<select id="f-top-model" bind:value={topModel} style="width:auto;min-width:220px">
+				<option value="">Semua model</option>
+				{#each top?.models ?? [] as m (m.model)}
+					<option value={m.model}>{m.model} — {fmtNum(m.requests)} req · {m.users} user</option>
+				{/each}
+			</select>
+			{#if topLoading}<span class="spinner dark"></span>{/if}
+		</div>
+		{#if top?.models?.length}
+			<div class="model-chips">
+				{#each top.models.slice(0, 8) as m (m.model)}
+					<button class="chip" class:on={topModel === m.model} onclick={() => (topModel = topModel === m.model ? '' : m.model)}>
+						<span class="mono">{truncate(m.model, 30)}</span> <b>{fmtNum(m.requests)}</b>
+					</button>
+				{/each}
+			</div>
+		{/if}
+		<div class="table-wrap">
+			<table>
+				<thead>
+					<tr><th>#</th><th>{t('user')}</th><th>{t('requests')}</th><th>Chat / API</th><th>{t('tokens')}</th><th>{t('cost')}</th><th>Model favorit</th><th>Terakhir</th></tr>
+				</thead>
+				<tbody>
+					{#each top?.users ?? [] as u, i (u.user_id)}
+						<tr>
+							<td class="muted">{i + 1}</td>
+							<td><a href="/users/{u.user_id}">{u.email}</a></td>
+							<td style="min-width:140px">
+								<div class="kv small"><b>{fmtNum(u.requests)}</b></div>
+								<div class="rank-bar"><div style="width:{(u.requests / topMax) * 100}%"></div></div>
+							</td>
+							<td class="small">
+								<span class="badge info" title="chat dashboard"><MessageSquare size={11} /> {fmtNum(u.chat_requests)}</span>
+								<span class="badge" title="lewat API key"><Plug size={11} /> {fmtNum(u.api_requests)}</span>
+							</td>
+							<td class="mono small">{fmtNum(u.tokens_in + u.tokens_out)}</td>
+							<td>{fmtCost(u.cost_usd)}</td>
+							<td class="mono small">{truncate(u.top_model, 28)}</td>
+							<td class="mono small">{fmtTs(u.last_used)}</td>
+						</tr>
+					{:else}
+						<tr><td colspan="8" class="muted">{t('no_data')}</td></tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
+	</div>
+
+	<div class="card" style="margin-top:14px">
 		<h2>{t('recent_logs')}</h2>
 		<div class="table-wrap">
 			<table>
@@ -259,6 +327,15 @@
 		border-radius: 6px;
 		transition: width 0.6s ease;
 	}
+	.model-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+	.chip {
+		border: 1px solid var(--border); background: var(--surface-2); color: inherit;
+		border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+	}
+	.chip:hover { border-color: var(--border-strong); }
+	.chip.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+	.rank-bar { height: 5px; margin-top: 4px; background: var(--surface-3); border-radius: 4px; overflow: hidden; }
+	.rank-bar div { height: 100%; background: var(--grad-accent); }
 	.sys-bar .fill.hot {
 		background: var(--warn);
 	}
