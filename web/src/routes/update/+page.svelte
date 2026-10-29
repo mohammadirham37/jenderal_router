@@ -73,6 +73,11 @@
 		if (!res) toast('Belum ada konfirmasi dari helper — cek `systemctl status jenderalrouter` di host', 'err');
 		else toast(res.message, res.ok ? 'ok' : 'err');
 		await load('0');
+		// binary baru membawa UI baru — muat ulang agar tab ini tidak menjalankan kode lama
+		if (res?.ok) {
+			toast('Memuat ulang dashboard ke versi baru…', 'info');
+			setTimeout(() => location.reload(), 1800);
+		}
 	}
 
 	async function startUpdate() {

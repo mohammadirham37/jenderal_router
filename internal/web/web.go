@@ -46,6 +46,9 @@ func Handler() http.Handler {
 		// aset build (/_app/…) dan file statis dilayani langsung
 		if path != "" {
 			if _, err := fs.Stat(sub, path); err == nil && !strings.HasSuffix(path, "/") {
+				if path == "_app/version.json" {
+					w.Header().Set("Cache-Control", "no-cache") // penanda versi UI — selalu segar
+				}
 				if strings.HasPrefix(path, "_app/immutable/") {
 					// nama file ber-hash konten → aman di-cache permanen
 					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")

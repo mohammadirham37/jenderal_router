@@ -7,6 +7,9 @@ export default defineConfig({
 	plugins: [
 		sveltekit({
 			preprocess: vitePreprocess(),
+			// cek /_app/version.json tiap menit — setelah update via dashboard,
+			// tab yang terbuka tahu ada UI baru (banner "Muat ulang")
+			version: { pollInterval: 60_000 },
 			adapter: adapter({
 				pages: 'build',
 				assets: 'build',

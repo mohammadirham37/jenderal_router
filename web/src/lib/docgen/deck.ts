@@ -29,35 +29,100 @@ const isStatItem = (b: Block) => b.kind === 'bullet' && STAT_RE.test(b.text.trim
 const CLOSING_RE = /^(terima\s*kasih|thank\s*you|tanya\s*jawab|q\s*&\s*a|sesi\s+tanya)/i;
 const NOTE_RE = /^(catatan\s+pembicara|speaker\s+notes?|notes?)\s*:\s*/i;
 
-/** pecah markdown jadi judul deck + daftar slide (## = slide) */
-export function planDeck(fallbackTitle: string, md: string) {
-	const blocks = parseMarkdown(md);
-	let title = fallbackTitle;
+const SLIDE_PREFIX = /^(?:slide|salindia|halaman)\s*\d+\s*[:.\-–—]\s*/i;
+const MARKER_RE = /^\*\*\s*(?:(?:slide|salindia)\s*\d+\s*[:.\-–—]\s*)?([^*]{2,90}?)\s*\*\*\s*:?$/i;
+const PLAIN_MARKER_RE = /^(?:slide|salindia)\s*\d+\s*[:.\-–—]\s*(.{2,90})$/i;
+
+/**
+ * Normalisasi struktur jawaban model yang tidak baku agar tetap jadi slide:
+ * heading level berapa pun (##, ###, # berulang), prefiks "Slide 1:",
+ * baris "**Slide 1: Judul**", atau poin tanpa heading sama sekali.
+ */
+function normalizeSlides(blocks: Block[]): { title: string | null; subtitle: string; blocks: Block[] } {
+	let title: string | null = null;
 	let subtitle = '';
+	const bs = [...blocks];
+	const firstH = bs.findIndex((b) => b.kind === 'heading');
+	const h1s = bs.filter((b) => b.kind === 'heading' && b.level === 1).length;
+	// judul deck: H1 pertama bila hanya satu H1 (H1 berulang = tiap slide)
+	if (firstH >= 0 && (bs[firstH] as any).level === 1 && h1s === 1) {
+		title = plain((bs[firstH] as any).text);
+		bs.splice(firstH, 1);
+		const nx = bs[firstH] as Block | undefined;
+		if (nx?.kind === 'para' && nx.text.length < 200 && !MARKER_RE.test(nx.text.trim()) && !PLAIN_MARKER_RE.test(nx.text.trim())) {
+			subtitle = plain(nx.text.replace(/^[*_]|[*_]$/g, ''));
+			bs.splice(firstH, 1);
+		}
+	}
+	// tanpa "# Judul": kalimat pendek pembuka dipakai sebagai judul deck
+	if (title === null && bs[0]?.kind === 'para') {
+		const t = (bs[0] as any).text.trim() as string;
+		if (t.length <= 80 && !MARKER_RE.test(t) && !PLAIN_MARKER_RE.test(t)) {
+			title = plain(t.replace(/[:.]$/, ''));
+			bs.shift();
+		}
+	}
+	let levels = bs.filter((b) => b.kind === 'heading').map((b) => (b as any).level as number);
+	if (levels.length === 0) {
+		// tanpa heading: baris penanda tebal / "Slide N:" dijadikan heading
+		for (let i = 0; i < bs.length; i++) {
+			const b = bs[i];
+			if (b.kind !== 'para') continue;
+			const t = b.text.trim();
+			const m = t.match(MARKER_RE) || t.match(PLAIN_MARKER_RE);
+			if (m) bs[i] = { kind: 'heading', level: 2, text: m[1].trim() };
+		}
+		levels = bs.filter((b) => b.kind === 'heading').map((b) => (b as any).level as number);
+	}
+	const slideLevel = levels.length ? Math.min(...levels) : 0;
+	const out: Block[] = bs.map((b) => {
+		if (b.kind !== 'heading') return b;
+		if (b.level === slideLevel) return { kind: 'heading', level: 2, text: b.text.replace(SLIDE_PREFIX, '').trim() || b.text };
+		// heading lebih dalam = sub-judul di dalam slide
+		return { kind: 'heading', level: 3, text: b.text };
+	});
+	return { title, subtitle, blocks: out };
+}
+
+/** pecah markdown jadi judul deck + daftar slide */
+export function planDeck(fallbackTitle: string, md: string) {
+	const norm = normalizeSlides(parseMarkdown(md));
+	const title = norm.title ?? fallbackTitle;
+	const subtitle = norm.subtitle;
 	const slides: SlideSpec[] = [];
 	let cur: SlideSpec | null = null;
-	for (let i = 0; i < blocks.length; i++) {
-		const b = blocks[i];
-		if (b.kind === 'heading' && b.level === 1 && slides.length === 0 && !cur) {
-			title = plain(b.text);
-			const nx = blocks[i + 1];
-			if (nx?.kind === 'para' && nx.text.length < 200) {
-				subtitle = plain(nx.text.replace(/^[*_]|[*_]$/g, ''));
-				i++;
-			}
-			continue;
-		}
-		if (b.kind === 'heading' && b.level <= 2) {
+	const loose: Block[] = []; // isi sebelum slide pertama
+	for (const b of norm.blocks) {
+		if (b.kind === 'heading' && b.level === 2) {
 			cur = { title: plain(b.text), blocks: [], notes: [] };
 			slides.push(cur);
 			continue;
 		}
-		if (!cur) continue; // teks sebelum slide pertama diabaikan
 		if (b.kind === 'para' && NOTE_RE.test(b.text)) {
-			cur.notes.push(plain(b.text.replace(NOTE_RE, '')));
+			if (cur) cur.notes.push(plain(b.text.replace(NOTE_RE, '')));
 			continue;
 		}
-		cur.blocks.push(b);
+		if (b.kind === 'heading') {
+			// sub-judul di dalam slide → poin tebal
+			(cur ? cur.blocks : loose).push({ kind: 'bullet', level: 0, text: '**' + plain(b.text) + '**' });
+			continue;
+		}
+		(cur ? cur.blocks : loose).push(b);
+	}
+	// isi tanpa slide (model tidak memakai heading): pecah per 5 butir
+	if (loose.length) {
+		const chunks: Block[][] = [];
+		for (const b of loose) {
+			const last = chunks[chunks.length - 1];
+			if (!last || last.filter((x) => x.kind !== 'table').length >= 5 || b.kind === 'table') chunks.push([b]);
+			else last.push(b);
+		}
+		const pre = chunks.map((blocks, i) => ({
+			title: chunks.length > 1 ? `${title} (${i + 1}/${chunks.length})` : title,
+			blocks,
+			notes: []
+		}));
+		slides.unshift(...pre);
 	}
 	return { title, subtitle, slides };
 }

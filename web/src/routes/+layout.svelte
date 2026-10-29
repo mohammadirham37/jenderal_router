@@ -1,11 +1,11 @@
 <script lang="ts">
 	import '../app.css';
-	import { page } from '$app/state';
+	import { page, updated } from '$app/state';
 	import { goto } from '$app/navigation';
 	import {
 		Satellite, LayoutDashboard, MessageSquare, Cable, BrainCircuit, Link2, Users,
 		ScrollText, ChartLine, Server, Settings, LogOut, Menu, X, PanelLeftClose,
-		PanelLeftOpen, Gauge, Rocket
+		PanelLeftOpen, Gauge, Rocket, RefreshCw
 	} from '@lucide/svelte';
 	import { browser } from '$app/env';
 	import ThemeToggle from '#lib/components/ThemeToggle.svelte';
@@ -160,10 +160,27 @@
 					JenderalRouter
 				</span>
 			</header>
+			{#if updated.current}
+				<div class="update-banner" role="status">
+					<RefreshCw size={15} />
+					<span class="grow"><b>Versi baru dashboard sudah terpasang.</b> Muat ulang agar fitur terbaru aktif (tab ini masih menjalankan versi lama).</span>
+					<button class="btn sm" onclick={() => location.reload()}>Muat ulang</button>
+				</div>
+			{/if}
 			{@render children()}
 		</main>
 	</div>
 {:else}
 	<div class="auth-screen"><div class="spinner dark"></div></div>
 {/if}
+<svelte:window onfocus={() => { if (!updated.current) updated.check().catch(() => {}); }} />
 <Toasts />
+<style>
+	.update-banner {
+		display: flex; align-items: center; gap: 10px; margin: 0 0 14px; padding: 10px 14px;
+		border-radius: 12px; font-size: 13px; animation: rise .3s ease;
+		background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+		border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+	}
+	@keyframes rise { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+</style>
