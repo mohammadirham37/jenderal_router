@@ -75,3 +75,40 @@ func TestRepairConversationTitles(t *testing.T) {
 		t.Fatalf("repair gagal: %q", got.Title)
 	}
 }
+
+func TestMessageMetaRoundTrip(t *testing.T) {
+	s, err := NewInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	u, err := s.CreateUser("meta@test", "Sandi-Kuat-123", RoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.CreateConversation(u.ID, "", "m1", "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddMessage(c.ID, "user", "baca go.dev", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	meta := `{"reasoning":"pikir","tools":[{"id":"c1","name":"web_fetch","result":"isi"}]}`
+	if _, err := s.AddMessageWithMeta(c.ID, "assistant", "ringkasan", "m1", "", meta); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := s.ListMessages(c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("want 2 messages, got %d", len(msgs))
+	}
+	if msgs[0].Meta != nil {
+		t.Errorf("user message should have no meta, got %s", msgs[0].Meta)
+	}
+	if string(msgs[1].Meta) != meta {
+		t.Errorf("meta = %s, want %s", msgs[1].Meta, meta)
+	}
+}

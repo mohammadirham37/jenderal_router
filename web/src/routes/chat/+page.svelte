@@ -13,11 +13,14 @@
 		role: 'user' | 'assistant' | 'tool'; content: string; provider?: string;
 		reasoning?: string; model?: string; ms?: number;
 		thinkStart?: number; thinkMs?: number; thinkOpen?: boolean; stopped?: boolean;
-		tools?: { name: string; args: string; url?: string }[];
+		tools?: ToolUse[];
 		file?: { name: string; url: string; size: number; type: DocType };
 		building?: DocType; // dokumen sedang dirakit
 	};
 	type ToolCall = { id: string; name: string; args: string };
+	// satu pemanggilan tool dalam giliran assistant; result ikut disimpan agar
+	// pertanyaan lanjutan tetap punya isi halaman yang sudah dibaca
+	type ToolUse = { id: string; name: string; args: string; url?: string; round: number; status: 'run' | 'ok' | 'err'; result?: string };
 
 	let models = $state<any[]>([]);
 	let model = $state('');
@@ -68,7 +71,10 @@
 			}
 		}
 	}];
-	const MAX_TOOL_ROUNDS = 4;
+	const MAX_TOOL_ROUNDS = 6;
+	// hanya N giliran bertool terakhir yang membawa hasil tool ke model —
+	// giliran lebih lama cukup teks jawabannya (hemat konteks)
+	const KEEP_TOOL_TURNS = 3;
 
 	const SUGGESTIONS = [
 		{ title: 'Ringkas halaman web', text: 'Ringkas isi https://go.dev/doc/ dalam 5 poin' },
@@ -120,9 +126,13 @@
 		current = id;
 		try {
 			const res = await api.get('/api/me/conversations/' + id);
-			msgs = (res.messages || []).map((m: any) => ({
-				role: m.role, content: m.content, provider: m.provider_name, model: m.model || undefined
-			}));
+			msgs = (res.messages || []).map((m: any) => {
+				const meta = m.meta || {};
+				return {
+					role: m.role, content: m.content, provider: m.provider_name, model: m.model || undefined,
+					reasoning: meta.reasoning, thinkMs: meta.think_ms, tools: meta.tools, stopped: meta.stopped
+				};
+			});
 			showHistory = false;
 			scrollToBottom(true);
 		} catch (e: any) { toast(e.message, 'err'); }
@@ -335,10 +345,7 @@
 
 		const history: any[] = [];
 		if (docType) history.push({ role: 'system', content: DOC_SYSTEM[docType] });
-		for (const m of msgs) {
-			if (m.role === 'user') history.push({ role: 'user', content: m.content });
-			else if (m.role === 'assistant' && m.content) history.push({ role: 'assistant', content: m.content });
-		}
+		history.push(...buildHistory(msgs));
 
 		const started = performance.now();
 		sendStart = started;
@@ -346,18 +353,22 @@
 		abort = new AbortController();
 		const signal = abort.signal;
 
+		// satu bubble per giliran: teks, penalaran, dan tool dari semua putaran menyatu
+		msgs.push({ role: 'assistant', content: '' });
+		const bubble = msgs[msgs.length - 1];
+		target = bubble;
+		scrollToBottom();
+
 		try {
 			for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-				msgs.push({ role: 'assistant', content: '' });
-				const bubble = msgs[msgs.length - 1];
-				target = bubble;
-				scrollToBottom();
-
+				if (bubble.content && !bubble.content.endsWith('\n')) bubble.content += '\n\n';
+				const roundStart = bubble.content.length;
 				let finish = '';
 				const pending: Record<number, ToolCall> = {};
 
 				await api.chatStream(
-					{ model, messages: history, tools: TOOLS, signal },
+					// putaran terakhir tanpa tool: model wajib menyimpulkan jawaban
+					{ model, conversationId: current, messages: history, tools: round < MAX_TOOL_ROUNDS ? TOOLS : undefined, signal },
 					(delta) => queue('content', delta),
 					() => { if (!quotaSeen) { quotaSeen = true; loadQuota(); } },
 					(extra) => {
@@ -384,51 +395,34 @@
 				const calls = Object.values(pending).filter((tc) => tc.name);
 				if (finish !== 'tool_calls' || calls.length === 0) break;
 
-				bubble.tools = (bubble.tools ?? []).concat(
-					calls.map((tc) => {
-						let u = '';
-						try { u = JSON.parse(tc.args || '{}').url || ''; } catch { /* */ }
-						return { name: tc.name, args: tc.args, url: u };
-					})
-				);
+				const uses: ToolUse[] = calls.map((tc, k) => {
+					let url = '';
+					try { url = JSON.parse(tc.args || '{}').url || ''; } catch { /* */ }
+					return { id: tc.id || `call_${round}_${k}`, name: tc.name, args: tc.args, url, round, status: 'run' };
+				});
+				bubble.tools = (bubble.tools ?? []).concat(uses);
+				const running = bubble.tools.slice(-uses.length); // proksi reaktif → chip ikut berubah
 				history.push({
 					role: 'assistant',
-					content: bubble.content || null,
-					tool_calls: calls.map((tc) => ({ id: tc.id, type: 'function', function: { name: tc.name, arguments: tc.args } }))
+					content: bubble.content.slice(roundStart).trim() || null,
+					tool_calls: running.map((u) => ({ id: u.id, type: 'function', function: { name: u.name, arguments: u.args || '{}' } }))
 				});
-				for (const tc of calls) {
-					let result = '';
-					const meta = bubble.tools?.[bubble.tools.length - 1];
-					if (tc.name === 'web_fetch') {
-						let url = '';
-						try { url = JSON.parse(tc.args || '{}').url || ''; } catch { /* */ }
-						try {
-							const r = await api.post('/api/me/tools/webfetch', { url });
-							result = 'Judul: ' + (r.title || '-') + '\n' + r.text;
-						} catch (e: any) {
-							result = 'ERROR: ' + e.message;
-						}
-						if (meta) meta.url = url;
-					} else {
-						result = 'ERROR: tool "' + tc.name + '" tidak dikenal';
-					}
-					history.push({ role: 'tool', tool_call_id: tc.id, content: result });
-				}
+				scrollToBottom();
+				await Promise.all(running.map(runTool));
+				for (const u of running) history.push({ role: 'tool', tool_call_id: u.id, content: u.result ?? '' });
 				scrollToBottom();
 			}
-			await saveTurn(text);
+			await saveTurn(text, bubble);
 			if (docType) await attachGeneratedFile(docType);
 			loadQuota();
 			loadConversations();
 		} catch (e: any) {
 			flushNow();
-			const last = msgs[msgs.length - 1];
-			if (e?.name === 'AbortError') {
-				if (last && last.role === 'assistant') last.stopped = true;
-			} else if (last && last.role === 'assistant') last.content += '\n\n**⚠ ' + e.message + '**';
-			else toast(e.message, 'err');
+			if (e?.name === 'AbortError') bubble.stopped = true;
+			else bubble.content += '\n\n**⚠ ' + e.message + '**';
+			for (const u of bubble.tools ?? []) if (u.status === 'run') { u.status = 'err'; u.result = 'ERROR: dibatalkan'; }
 			// simpan best-effort: user + jawaban parsial agar tidak hilang saat refresh
-			if (current) try { await saveTurn(text); } catch { /* */ }
+			if (current) try { await saveTurn(text, bubble); } catch { /* */ }
 		} finally {
 			target = null;
 			abort = null;
@@ -439,11 +433,63 @@
 			inputEl?.focus();
 		}
 	}
-	async function saveTurn(text: string) {
+
+	// riwayat untuk model: setiap giliran mengirim teksnya; giliran bertool
+	// terbaru juga mengirim pemanggilan tool + hasilnya (per putaran).
+	function buildHistory(list: Msg[]): any[] {
+		const keep = new Set<Msg>();
+		for (let i = list.length - 1; i >= 0 && keep.size < KEEP_TOOL_TURNS; i--) {
+			if (list[i].role === 'assistant' && list[i].tools?.length) keep.add(list[i]);
+		}
+		const out: any[] = [];
+		for (const m of list) {
+			if (m.role === 'user') out.push({ role: 'user', content: m.content });
+			else if (m.role === 'assistant') {
+				if (keep.has(m)) out.push(...toolMessages(m.tools!));
+				if (m.content.trim()) out.push({ role: 'assistant', content: m.content });
+			}
+		}
+		return out;
+	}
+	function toolMessages(tools: ToolUse[]): any[] {
+		const out: any[] = [];
+		for (const r of [...new Set(tools.map((u) => u.round))]) {
+			const done = tools.filter((u) => u.round === r && u.result !== undefined);
+			if (!done.length) continue;
+			out.push({
+				role: 'assistant', content: null,
+				tool_calls: done.map((u) => ({ id: u.id, type: 'function', function: { name: u.name, arguments: u.args || '{}' } }))
+			});
+			for (const u of done) out.push({ role: 'tool', tool_call_id: u.id, content: u.result });
+		}
+		return out;
+	}
+
+	// eksekusi tool di server; error dikembalikan ke model sebagai teks
+	async function runTool(u: ToolUse) {
+		try {
+			if (u.name !== 'web_fetch') throw new Error(`tool "${u.name}" tidak dikenal`);
+			const r = await api.post('/api/me/tools/webfetch', { url: u.url });
+			u.result = 'Judul: ' + (r.title || '-') + '\nURL: ' + u.url + '\n\n' + r.text;
+			u.status = 'ok';
+		} catch (e: any) {
+			u.result = 'ERROR: ' + e.message;
+			u.status = 'err';
+		}
+	}
+
+	function msgMeta(m: Msg) {
+		const meta: Record<string, any> = {};
+		if (m.reasoning) meta.reasoning = m.reasoning;
+		if (m.thinkMs) meta.think_ms = Math.round(m.thinkMs);
+		if (m.tools?.length) meta.tools = m.tools.map(({ id, name, args, url, round, status, result }) => ({ id, name, args, url, round, status, result }));
+		if (m.stopped) meta.stopped = true;
+		return Object.keys(meta).length ? meta : undefined;
+	}
+	async function saveTurn(text: string, bubble: Msg) {
 		await api.post(`/api/me/conversations/${current}/messages`, { role: 'user', content: text });
-		const la = [...msgs].reverse().find((m) => m.role === 'assistant');
 		await api.post(`/api/me/conversations/${current}/messages`, {
-			role: 'assistant', content: la?.content || '', model: la?.model || model
+			role: 'assistant', content: bubble.content.trim(), model: bubble.model || model, meta: msgMeta(bubble)
 		});
 	}
 
@@ -556,7 +602,11 @@
 								{#if m.tools?.length}
 									<div class="tool-chips">
 										{#each m.tools as tl}
-											<span class="tool-chip" title={tl.args}><Globe size={12} /> Membaca {tl.url || tl.name}</span>
+											<span class="tool-chip" class:err={tl.status === 'err'} title={tl.status === 'err' ? tl.result : tl.args}>
+												<Globe size={12} />
+												{#if tl.status === 'run'}<span class="shimmer">Membaca {tl.url || tl.name}</span>
+												{:else}{tl.status === 'err' ? 'Gagal membaca' : 'Dibaca'} {tl.url || tl.name}{/if}
+											</span>
 										{/each}
 									</div>
 								{/if}
@@ -764,6 +814,7 @@
 		background: var(--surface-2); border: 1px solid var(--border);
 		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 	}
+	.tool-chip.err { color: var(--err); border-color: color-mix(in srgb, var(--err) 35%, var(--border)); }
 
 	/* ---------- jawaban (markdown) ---------- */
 	.answer { font-size: 15px; line-height: 1.72; overflow-wrap: anywhere; }

@@ -110,6 +110,9 @@ func (a *App) handleMeAPIModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"models": out})
 }
 
+// maxMessageMeta batas metadata per pesan (penalaran + hasil tool).
+const maxMessageMeta = 512 << 10
+
 // handleSaveMessage menyimpan pesan riwayat percakapan (FR-7.2).
 func (a *App) handleSaveMessage(w http.ResponseWriter, r *http.Request) {
 	ai := authFrom(r)
@@ -123,18 +126,27 @@ func (a *App) handleSaveMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-		Model   string `json:"model"`
+		Role    string          `json:"role"`
+		Content string          `json:"content"`
+		Model   string          `json:"model"`
+		Meta    json.RawMessage `json:"meta"`
 	}
-	if err := decodeBody(w, r, &req); err != nil || req.Content == "" {
+	if err := decodeBody(w, r, &req); err != nil || (req.Content == "" && len(req.Meta) == 0) {
 		writeJSON(w, 400, map[string]string{"error": "content wajib"})
 		return
+	}
+	meta := ""
+	if len(req.Meta) > 0 && string(req.Meta) != "null" {
+		if !json.Valid(req.Meta) || len(req.Meta) > maxMessageMeta {
+			writeJSON(w, 400, map[string]string{"error": "meta tidak sah atau terlalu besar"})
+			return
+		}
+		meta = string(req.Meta)
 	}
 	if req.Role != "user" && req.Role != "assistant" && req.Role != "system" {
 		req.Role = "user"
 	}
-	if _, err := a.st.AddMessage(id, req.Role, req.Content, req.Model, ""); err != nil {
+	if _, err := a.st.AddMessageWithMeta(id, req.Role, req.Content, req.Model, "", meta); err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
@@ -158,10 +170,19 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var opt struct {
-		Stream *bool `json:"stream"`
+		Stream         *bool `json:"stream"`
+		ConversationID int64 `json:"conversation_id"`
 	}
 	_ = json.Unmarshal(raw, &opt)
 	internal.Stream = opt.Stream == nil || *opt.Stream
+	// instruksi dasar asisten (+ instruksi khusus percakapan bila ada)
+	custom := ""
+	if opt.ConversationID > 0 {
+		if c, err := a.st.GetConversation(opt.ConversationID); err == nil && c.UserID == ai.user.ID {
+			custom = c.SystemPrompt
+		}
+	}
+	internal.Messages = withChatSystemPrompt(internal.Messages, a.chatSystemPrompt(ai.user, internal.Tools, custom))
 	// kuota user (FR-4.4)
 	if qs := usage.QuotaCheck(a.st, ai.user.ID, 0); !qs.OK {
 		writeJSON(w, 429, map[string]string{"error": qs.Reason})

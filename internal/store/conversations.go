@@ -28,7 +28,9 @@ type Message struct {
 	Content        string `json:"content"`
 	Model          string `json:"model"`
 	ProviderName   string `json:"provider_name"`
-	CreatedAt      string `json:"created_at"`
+	// Meta JSON bebas milik UI chat (penalaran, tool + hasilnya); kosong = tidak ada.
+	Meta      json.RawMessage `json:"meta,omitempty"`
+	CreatedAt string          `json:"created_at"`
 }
 
 // CreateConversation membuat percakapan baru.
@@ -179,14 +181,22 @@ func (s *Store) DeleteConversation(id int64) error {
 // AddMessage menambah pesan ke percakapan. Pesan user pertama otomatis
 // menamai percakapan yang masih memakai judul bawaan.
 func (s *Store) AddMessage(conversationID int64, role, content, model, providerName string) (*Message, error) {
-	res, err := s.DB.Exec(`INSERT INTO messages (conversation_id, role, content, model, provider_name) VALUES (?,?,?,?,?)`,
-		conversationID, role, content, model, providerName)
+	return s.AddMessageWithMeta(conversationID, role, content, model, providerName, "")
+}
+
+// AddMessageWithMeta seperti AddMessage plus metadata JSON (boleh kosong).
+func (s *Store) AddMessageWithMeta(conversationID int64, role, content, model, providerName, meta string) (*Message, error) {
+	res, err := s.DB.Exec(`INSERT INTO messages (conversation_id, role, content, model, provider_name, meta) VALUES (?,?,?,?,?,?)`,
+		conversationID, role, content, model, providerName, meta)
 	if err != nil {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
 	m := &Message{ID: id, ConversationID: conversationID, Role: role, Content: content,
 		Model: model, ProviderName: providerName}
+	if meta != "" {
+		m.Meta = json.RawMessage(meta)
+	}
 	s.autoTitle(conversationID, role, content)
 	return m, nil
 }
@@ -234,7 +244,7 @@ func (s *Store) RepairConversationTitles() {
 
 // ListMessages pesan percakapan urut waktu.
 func (s *Store) ListMessages(conversationID int64) ([]*Message, error) {
-	rows, err := s.DB.Query(`SELECT id, conversation_id, role, content, model, provider_name, created_at
+	rows, err := s.DB.Query(`SELECT id, conversation_id, role, content, model, provider_name, meta, created_at
 		FROM messages WHERE conversation_id = ? ORDER BY id`, conversationID)
 	if err != nil {
 		return nil, err
@@ -243,8 +253,12 @@ func (s *Store) ListMessages(conversationID int64) ([]*Message, error) {
 	var out []*Message
 	for rows.Next() {
 		m := &Message{}
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.Role, &m.Content, &m.Model, &m.ProviderName, &m.CreatedAt); err != nil {
+		var meta string
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.Role, &m.Content, &m.Model, &m.ProviderName, &meta, &m.CreatedAt); err != nil {
 			return nil, err
+		}
+		if meta != "" {
+			m.Meta = json.RawMessage(meta)
 		}
 		out = append(out, m)
 	}
