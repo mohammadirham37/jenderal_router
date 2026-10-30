@@ -37,6 +37,11 @@ type Config struct {
 	TrustedProxies []string
 	// LogRetentionDays hapus request_logs lebih tua dari N hari (0 = simpan selamanya).
 	LogRetentionDays int
+	// Backend tool web_search chat. Prioritas: SearXNG → Brave → Tavily;
+	// semuanya kosong = halaman HTML Brave Search (tanpa API key).
+	SearXNGURL   string // JR_SEARXNG_URL, mis. http://127.0.0.1:8888
+	BraveAPIKey  string // JR_BRAVE_API_KEY
+	TavilyAPIKey string // JR_TAVILY_API_KEY
 }
 
 // Load membaca env dan mengembalikan konfigurasi final.
@@ -53,6 +58,9 @@ func Load() (*Config, error) {
 		BackupHour:       envInt("JR_BACKUP_HOUR", 3),
 		Environment:      env("JR_ENV", "production"),
 		LogRetentionDays: envInt("JR_LOG_RETENTION_DAYS", 0),
+		SearXNGURL:       strings.TrimRight(env("JR_SEARXNG_URL", ""), "/"),
+		BraveAPIKey:      env("JR_BRAVE_API_KEY", ""),
+		TavilyAPIKey:     env("JR_TAVILY_API_KEY", ""),
 	}
 	c.DatabaseURL = env("JR_DATABASE_URL", filepath.Join(c.DataDir, "jenderalrouter.db"))
 	c.RedisURL = env("JR_REDIS_URL", "")

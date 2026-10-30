@@ -38,6 +38,9 @@ func TestChatSystemPrompt(t *testing.T) {
 	if !strings.Contains(full, "Tool tersedia: web_fetch") {
 		t.Errorf("prompt missing tool list:\n%s", full)
 	}
+	if !strings.Contains(full, "web_fetch membaca") || strings.Contains(full, "create_document menyiapkan") || !strings.Contains(full, "tautan Markdown") {
+		t.Errorf("prompt must describe only the tools sent:\n%s", full)
+	}
 	if !strings.Contains(full, "Jawab dalam bahasa Inggris.") {
 		t.Errorf("prompt missing custom instructions:\n%s", full)
 	}

@@ -4,18 +4,19 @@ package api
 
 import (
 	"context"
-	"github.com/jenderal/jenderalrouter/internal/captcha"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/jenderal/jenderalrouter/internal/apigate"
+	"github.com/jenderal/jenderalrouter/internal/captcha"
 	"github.com/jenderal/jenderalrouter/internal/config"
 	"github.com/jenderal/jenderalrouter/internal/provider"
 	"github.com/jenderal/jenderalrouter/internal/router"
 	"github.com/jenderal/jenderalrouter/internal/store"
 	"github.com/jenderal/jenderalrouter/internal/usage"
 	"github.com/jenderal/jenderalrouter/internal/web"
+	"github.com/jenderal/jenderalrouter/internal/websearch"
 )
 
 // App memegang seluruh dependensi aplikasi (store, gate, client, dst).
@@ -30,6 +31,7 @@ type App struct {
 	chatRes   router.Resolver // kanal chat dashboard
 	captcha   *captcha.Store  // captcha login password
 	localGate *localGate
+	search    websearch.Searcher // tool web_search chat
 	mux       *http.ServeMux
 }
 
@@ -58,7 +60,10 @@ func NewApp(cfg *config.Config) (*App, error) {
 		chatRes:   storeResolver{st: st, channel: "chat"},
 		captcha:   captcha.NewStore(10000),
 		localGate: newLocalGate(),
-		mux:       http.NewServeMux(),
+		search: websearch.Cached(websearch.New(websearch.Config{
+			SearXNGURL: cfg.SearXNGURL, BraveAPIKey: cfg.BraveAPIKey, TavilyAPIKey: cfg.TavilyAPIKey,
+		}, provider.NewPublicHTTPClient(20*time.Second)), 15*time.Minute, 512),
+		mux: http.NewServeMux(),
 	}
 	a.routes()
 	return a, nil

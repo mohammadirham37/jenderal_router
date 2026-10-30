@@ -6,6 +6,7 @@ package api
 // HTML → teks sederhana.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jenderal/jenderalrouter/internal/provider"
+	"github.com/jenderal/jenderalrouter/internal/websearch"
 )
 
 var stripBlockRe = []*regexp.Regexp{
@@ -124,4 +126,42 @@ func (a *App) handleToolWebFetch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url": target, "title": title, "chars": len([]rune(text)), "text": text,
 	})
+}
+
+// handleToolWebSearch POST /api/me/tools/websearch — {query, count}.
+func (a *App) handleToolWebSearch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Query string `json:"query"`
+		Count int    `json:"count"`
+	}
+	if err := decodeBody(w, r, &req); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "body tidak sah"})
+		return
+	}
+	q := strings.TrimSpace(req.Query)
+	if q == "" {
+		writeJSON(w, 400, map[string]string{"error": "query wajib"})
+		return
+	}
+	if r := []rune(q); len(r) > 400 {
+		q = string(r[:400])
+	}
+	if req.Count <= 0 || req.Count > 10 {
+		req.Count = 6
+	}
+	results, err := a.search.Search(r.Context(), q, req.Count)
+	if err != nil {
+		msg := "pencarian gagal"
+		if errors.Is(err, provider.ErrSSRFBlocked) {
+			msg = "alamat internal/privat tidak diizinkan"
+		} else if errors.Is(err, websearch.ErrRateLimited) && a.search.Name() == "brave-html" {
+			msg += ": " + err.Error() + ". Admin dapat mengatur JR_SEARXNG_URL atau JR_BRAVE_API_KEY agar pencarian lebih andal"
+		} else if !errors.Is(err, context.Canceled) {
+			msg += ": " + err.Error()
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": msg})
+		return
+	}
+	a.audit(r, "tool.websearch", q, nil, map[string]any{"backend": a.search.Name(), "results": len(results)})
+	writeJSON(w, http.StatusOK, map[string]any{"query": q, "backend": a.search.Name(), "results": results})
 }

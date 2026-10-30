@@ -295,6 +295,9 @@ Tanpa GPU, jadikan model lokal **langkah terakhir combo**.
 | `JR_SESSION_TTL` | `24h` | Masa berlaku sesi dashboard |
 | `JR_TRUSTED_PROXIES` | — (loopback selalu dipercaya) | CIDR/IP proxy tambahan (pisah koma) yang header `X-Forwarded-For`-nya dipercaya |
 | `JR_LOG_RETENTION_DAYS` | `0` (simpan selamanya) | Hapus `request_logs` lebih tua dari N hari |
+| `JR_SEARXNG_URL` | — | Backend tool `web_search` chat: instance SearXNG (format JSON harus aktif) |
+| `JR_BRAVE_API_KEY` | — | Backend `web_search`: Brave Search API (dipakai bila SearXNG kosong) |
+| `JR_TAVILY_API_KEY` | — | Backend `web_search`: Tavily (dipakai bila dua di atas kosong). Semua kosong = halaman Brave Search tanpa key, terbatas ~5 permintaan/menit |
 
 ## Operasi
 

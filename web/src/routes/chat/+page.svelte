@@ -1,7 +1,7 @@
 <script lang="ts">
 	import {
 		Plus, ArrowUp, Square, Trash2, Sparkles, History, Globe, Activity, Gauge, Download, FileText,
-		Presentation, Sheet, Table, Copy, Check, ArrowDown, ChevronRight, Brain, Bot
+		Presentation, Sheet, Table, Copy, Check, ArrowDown, ChevronRight, Brain, Bot, Search
 	} from '@lucide/svelte';
 	import { api, md, fmtTs, fmtNum } from '#lib/api.js';
 	import { copyText } from '#lib/clipboard.js';
@@ -20,7 +20,10 @@
 	type ToolCall = { id: string; name: string; args: string };
 	// satu pemanggilan tool dalam giliran assistant; result ikut disimpan agar
 	// pertanyaan lanjutan tetap punya isi halaman yang sudah dibaca
-	type ToolUse = { id: string; name: string; args: string; url?: string; round: number; status: 'run' | 'ok' | 'err'; result?: string };
+	type ToolUse = {
+		id: string; name: string; args: string; round: number; status: 'run' | 'ok' | 'err'; result?: string;
+		url?: string; query?: string; hits?: number; doc?: DocType;
+	};
 
 	let models = $state<any[]>([]);
 	let model = $state('');
@@ -58,26 +61,29 @@
 	});
 	const periodLabel = (p: string) => (p === 'month' ? 'bulanan' : 'harian');
 
-	// tool bawaan: web_fetch — dieksekusi sisi server (guard SSRF aktif)
-	const TOOLS = [{
-		type: 'function',
-		function: {
-			name: 'web_fetch',
-			description: 'Mengambil isi sebuah halaman web publik. Gunakan saat pengguna menyebutkan URL/link atau membutuhkan informasi terkini dari web.',
-			parameters: {
-				type: 'object',
-				properties: { url: { type: 'string', description: 'URL lengkap halaman, mulai dengan http atau https' } },
-				required: ['url']
-			}
-		}
-	}];
+	// tool bawaan — web_search & web_fetch dieksekusi server (guard SSRF aktif),
+	// create_document dieksekusi di browser (generator file lokal)
+	const fn = (name: string, description: string, properties: Record<string, any>, required: string[]) =>
+		({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } });
+	const WEB_TOOLS = [
+		fn('web_search', 'Mencari di web dan mengembalikan daftar hasil (judul, URL, cuplikan). Gunakan untuk informasi terkini atau fakta yang tidak diketahui pasti.',
+			{ query: { type: 'string', description: 'Kueri pencarian singkat dan spesifik' } }, ['query']),
+		fn('web_fetch', 'Mengambil isi teks sebuah halaman web publik. Gunakan saat pengguna menyebutkan URL, atau untuk membaca hasil web_search yang relevan.',
+			{ url: { type: 'string', description: 'URL lengkap halaman, mulai dengan http atau https' } }, ['url'])
+	];
+	const DOC_TOOL = fn('create_document',
+		'Menyiapkan file unduhan dari jawaban berikutnya. Panggil hanya bila pengguna meminta file Word/PowerPoint/Excel/CSV, dokumen, laporan, presentasi, atau spreadsheet.',
+		{
+			type: { type: 'string', enum: ['docx', 'pptx', 'xlsx', 'csv'], description: 'docx=Word, pptx=PowerPoint, xlsx=Excel, csv=CSV' },
+			title: { type: 'string', description: 'Judul dokumen' }
+		}, ['type']);
 	const MAX_TOOL_ROUNDS = 6;
 	// hanya N giliran bertool terakhir yang membawa hasil tool ke model —
 	// giliran lebih lama cukup teks jawabannya (hemat konteks)
 	const KEEP_TOOL_TURNS = 3;
 
 	const SUGGESTIONS = [
-		{ title: 'Ringkas halaman web', text: 'Ringkas isi https://go.dev/doc/ dalam 5 poin' },
+		{ title: 'Cari info terkini', text: 'Apa kabar terbaru soal harga beras di Indonesia? Sertakan sumbernya' },
 		{ title: 'Buat presentasi', text: 'Buatkan ppt 6 slide tentang manfaat AI untuk UMKM' },
 		{ title: 'Buat laporan Word', text: 'Buatkan laporan kegiatan pelatihan AI untuk dosen, lengkap dengan ringkasan eksekutif, tabel peserta, dan rekomendasi' },
 		{ title: 'Tulis kode', text: 'Tulis fungsi Go untuk membaca file CSV dan menghitung rata-rata kolom' }
@@ -251,15 +257,18 @@
 		const m = s.match(/^#{1,3}\s+(.+)/m);
 		return m ? m[1].replace(/^#+\s+/, '').trim() : '';
 	}
-	async function attachGeneratedFile(type: DocType) {
+	// markdown: isi dokumen (default seluruh jawaban); fallbackTitle dari argumen tool
+	async function attachGeneratedFile(type: DocType, markdown?: string, fallbackTitle?: string) {
 		const bubble = [...msgs].reverse().find((m) => m.role === 'assistant' && m.content.trim());
 		if (!bubble) return;
+		const body = (markdown ?? bubble.content).trim();
+		if (!body) return;
 		bubble.building = type;
 		scrollToBottom();
 		try {
-			const title = firstH1(bubble.content) || convTitle();
+			const title = firstH1(body) || fallbackTitle || convTitle();
 			// generator membaca judul (#) & subjudul dari markdown untuk sampul/slide judul
-			const blob = await buildDocBlob(type, title, bubble.content);
+			const blob = await buildDocBlob(type, title, body);
 			bubble.file = { name: docFileName(title, type), url: URL.createObjectURL(blob), size: blob.size, type };
 		} catch (e: any) {
 			toast('gagal merakit file: ' + e.message, 'err');
@@ -330,7 +339,13 @@
 		if (!text || sending) return;
 		sending = true;
 		input = '';
-		const docType: DocType | null = fileMode === 'auto' ? detectDocRequest(text) : fileMode === 'none' ? null : fileMode;
+		// mode paksa / deteksi kata kunci → instruksi dokumen sejak awal; selain itu
+		// model sendiri yang memutuskan lewat tool create_document
+		const forcedDoc: DocType | null = fileMode === 'auto' ? detectDocRequest(text) : fileMode === 'none' ? null : fileMode;
+		const tools = forcedDoc || fileMode === 'none' ? WEB_TOOLS : [...WEB_TOOLS, DOC_TOOL];
+		let docType = forcedDoc;
+		let docStart = -1; // dokumen dari tool: isi = teks sejak putaran setelah tool
+		let docTitle = '';
 		fileMode = 'auto';
 		if (!current) {
 			try { await newConversation(); }
@@ -344,7 +359,7 @@
 		scrollToBottom(true, true);
 
 		const history: any[] = [];
-		if (docType) history.push({ role: 'system', content: DOC_SYSTEM[docType] });
+		if (forcedDoc) history.push({ role: 'system', content: DOC_SYSTEM[forcedDoc] });
 		history.push(...buildHistory(msgs));
 
 		const started = performance.now();
@@ -363,12 +378,13 @@
 			for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
 				if (bubble.content && !bubble.content.endsWith('\n')) bubble.content += '\n\n';
 				const roundStart = bubble.content.length;
+				if (docStart >= 0) docStart = roundStart;
 				let finish = '';
 				const pending: Record<number, ToolCall> = {};
 
 				await api.chatStream(
 					// putaran terakhir tanpa tool: model wajib menyimpulkan jawaban
-					{ model, conversationId: current, messages: history, tools: round < MAX_TOOL_ROUNDS ? TOOLS : undefined, signal },
+					{ model, conversationId: current, messages: history, tools: round < MAX_TOOL_ROUNDS ? tools : undefined, signal },
 					(delta) => queue('content', delta),
 					() => { if (!quotaSeen) { quotaSeen = true; loadQuota(); } },
 					(extra) => {
@@ -396,9 +412,12 @@
 				if (finish !== 'tool_calls' || calls.length === 0) break;
 
 				const uses: ToolUse[] = calls.map((tc, k) => {
-					let url = '';
-					try { url = JSON.parse(tc.args || '{}').url || ''; } catch { /* */ }
-					return { id: tc.id || `call_${round}_${k}`, name: tc.name, args: tc.args, url, round, status: 'run' };
+					let a: any = {};
+					try { a = JSON.parse(tc.args || '{}') || {}; } catch { /* */ }
+					return {
+						id: tc.id || `call_${round}_${k}`, name: tc.name, args: tc.args, round, status: 'run',
+						url: a.url || undefined, query: a.query || undefined, doc: a.type || undefined
+					};
 				});
 				bubble.tools = (bubble.tools ?? []).concat(uses);
 				const running = bubble.tools.slice(-uses.length); // proksi reaktif → chip ikut berubah
@@ -410,10 +429,16 @@
 				scrollToBottom();
 				await Promise.all(running.map(runTool));
 				for (const u of running) history.push({ role: 'tool', tool_call_id: u.id, content: u.result ?? '' });
+				const doc = running.find((u) => u.name === 'create_document' && u.status === 'ok');
+				if (doc?.doc) {
+					docType = doc.doc;
+					docStart = 0; // diganti awal putaran berikutnya
+					try { docTitle = JSON.parse(doc.args || '{}').title || ''; } catch { /* */ }
+				}
 				scrollToBottom();
 			}
 			await saveTurn(text, bubble);
-			if (docType) await attachGeneratedFile(docType);
+			if (docType) await attachGeneratedFile(docType, docStart >= 0 ? bubble.content.slice(docStart) : undefined, docTitle);
 			loadQuota();
 			loadConversations();
 		} catch (e: any) {
@@ -465,12 +490,28 @@
 		return out;
 	}
 
-	// eksekusi tool di server; error dikembalikan ke model sebagai teks
+	// eksekusi tool; error dikembalikan ke model sebagai teks agar ia bisa menyesuaikan
 	async function runTool(u: ToolUse) {
 		try {
-			if (u.name !== 'web_fetch') throw new Error(`tool "${u.name}" tidak dikenal`);
-			const r = await api.post('/api/me/tools/webfetch', { url: u.url });
-			u.result = 'Judul: ' + (r.title || '-') + '\nURL: ' + u.url + '\n\n' + r.text;
+			if (u.name === 'web_search') {
+				if (!u.query) throw new Error('argumen query wajib');
+				const r = await api.post('/api/me/tools/websearch', { query: u.query });
+				const list: any[] = r.results || [];
+				u.hits = list.length;
+				u.result = list.length
+					? `Hasil pencarian untuk "${u.query}":\n\n` +
+						list.map((x, i) => `${i + 1}. ${x.title}\n   URL: ${x.url}\n   ${x.snippet || ''}`).join('\n\n') +
+						'\n\nBaca halaman yang relevan dengan web_fetch bila cuplikan belum cukup.'
+					: `Tidak ada hasil untuk "${u.query}". Coba kueri lain yang lebih umum.`;
+			} else if (u.name === 'web_fetch') {
+				if (!u.url) throw new Error('argumen url wajib');
+				const r = await api.post('/api/me/tools/webfetch', { url: u.url });
+				u.result = 'Judul: ' + (r.title || '-') + '\nURL: ' + u.url + '\n\n' + r.text;
+			} else if (u.name === 'create_document') {
+				if (!u.doc || !(u.doc in DOC_SYSTEM)) throw new Error('type harus docx, pptx, xlsx, atau csv');
+				u.result = DOC_SYSTEM[u.doc] +
+					'\n\nFile akan dirakit otomatis dari jawabanmu berikutnya. Tulis isi lengkap dokumen sekarang, tanpa memanggil create_document lagi.';
+			} else throw new Error(`tool "${u.name}" tidak dikenal`);
 			u.status = 'ok';
 		} catch (e: any) {
 			u.result = 'ERROR: ' + e.message;
@@ -478,11 +519,26 @@
 		}
 	}
 
+	const TOOL_ICONS: Record<string, any> = { web_search: Search, web_fetch: Globe, create_document: FileText };
+	function chipText(u: ToolUse): string {
+		const err = u.status === 'err', run = u.status === 'run';
+		if (u.name === 'web_search') {
+			const q = `"${u.query ?? ''}"`;
+			return err ? `Gagal mencari ${q}` : run ? `Mencari ${q}` : `Dicari ${q} · ${u.hits ?? 0} hasil`;
+		}
+		if (u.name === 'create_document') {
+			const what = u.doc && u.doc in DOC_LABEL ? DOC_LABEL[u.doc] : 'dokumen';
+			return err ? 'Gagal menyiapkan dokumen' : `Menyiapkan ${what}`;
+		}
+		const target = u.url || u.name;
+		return err ? `Gagal membaca ${target}` : run ? `Membaca ${target}` : `Dibaca ${target}`;
+	}
+
 	function msgMeta(m: Msg) {
 		const meta: Record<string, any> = {};
 		if (m.reasoning) meta.reasoning = m.reasoning;
 		if (m.thinkMs) meta.think_ms = Math.round(m.thinkMs);
-		if (m.tools?.length) meta.tools = m.tools.map(({ id, name, args, url, round, status, result }) => ({ id, name, args, url, round, status, result }));
+		if (m.tools?.length) meta.tools = m.tools.map(({ id, name, args, url, query, hits, doc, round, status, result }) => ({ id, name, args, url, query, hits, doc, round, status, result }));
 		if (m.stopped) meta.stopped = true;
 		return Object.keys(meta).length ? meta : undefined;
 	}
@@ -550,7 +606,7 @@
 					<div class="welcome">
 						<div class="orb" aria-hidden="true"><Sparkles size={22} /></div>
 						<h2>Apa yang bisa saya bantu?</h2>
-						<p class="muted">Model bisa membaca halaman web, membuat dokumen Word/PowerPoint/Excel, dan menulis kode.</p>
+						<p class="muted">Model bisa mencari dan membaca web, membuat dokumen Word/PowerPoint/Excel, dan menulis kode.</p>
 						<div class="suggest">
 							{#each SUGGESTIONS as s, i (s.title)}
 								<button style="--d:{i * 60}ms" onclick={() => useSuggestion(s.text)}>
@@ -602,10 +658,10 @@
 								{#if m.tools?.length}
 									<div class="tool-chips">
 										{#each m.tools as tl}
+											{@const TIcon = TOOL_ICONS[tl.name] ?? Globe}
 											<span class="tool-chip" class:err={tl.status === 'err'} title={tl.status === 'err' ? tl.result : tl.args}>
-												<Globe size={12} />
-												{#if tl.status === 'run'}<span class="shimmer">Membaca {tl.url || tl.name}</span>
-												{:else}{tl.status === 'err' ? 'Gagal membaca' : 'Dibaca'} {tl.url || tl.name}{/if}
+												<TIcon size={12} />
+												{#if tl.status === 'run'}<span class="shimmer">{chipText(tl)}</span>{:else}{chipText(tl)}{/if}
 											</span>
 										{/each}
 									</div>
@@ -689,7 +745,7 @@
 						title="Otomatis: file dibuat bila pesan meminta dokumen/presentasi/excel">
 						{#each FILE_MODES as f (f.v)}<option value={f.v}>{f.label}</option>{/each}
 					</select>
-					<span class="tool-badge" title="Model bisa memanggil web_fetch untuk membaca halaman web"><Globe size={12} /> web</span>
+					<span class="tool-badge" title="Model bisa mencari di web (web_search), membaca halaman (web_fetch), dan membuat file (create_document)"><Globe size={12} /> web</span>
 					<span class="grow"></span>
 					{#if sending}
 						<button class="send stop" onclick={stop} title="Hentikan jawaban" aria-label="Hentikan"><Square size={13} fill="currentColor" /></button>

@@ -109,6 +109,7 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("GET /api/me/keys/{id}/reveal", a.requireSession(a.handleMeRevealKey, store.RoleMember, false))
 	a.mux.HandleFunc("GET /api/me/logs", a.requireSession(a.handleMeLogs, store.RoleMember, false))
 	a.mux.HandleFunc("POST /api/me/tools/webfetch", a.requireSession(a.handleToolWebFetch, store.RoleMember, true))
+	a.mux.HandleFunc("POST /api/me/tools/websearch", a.requireSession(a.handleToolWebSearch, store.RoleMember, true))
 
 	// login OAuth Google — publik (mulai + callback)
 	a.mux.HandleFunc("GET /google/auth", a.handleGoogleAuth)

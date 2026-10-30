@@ -26,6 +26,12 @@ services:
       JR_LOG_PROMPTS: "${JR_LOG_PROMPTS:-false}"
       # LlamaStash di host (bukan container) — akses via gateway docker:
       JR_LLAMASTASH_URL: "${JR_LLAMASTASH_URL:-http://host.docker.internal:11435/v1}"
+      # Backend tool web_search chat (pilih salah satu; kosong semua = halaman
+      # Brave Search tanpa key, ~5 permintaan/menit). Contoh SearXNG di bawah:
+      # JR_SEARXNG_URL=http://searxng:8080
+      JR_SEARXNG_URL: "${JR_SEARXNG_URL:-}"
+      JR_BRAVE_API_KEY: "${JR_BRAVE_API_KEY:-}"
+      JR_TAVILY_API_KEY: "${JR_TAVILY_API_KEY:-}"
     # host.docker.internal → IP host (untuk LlamaStash di host)
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -56,6 +62,18 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+
+  # OPSIONAL — SearXNG (mesin pencari self-host untuk tool web_search).
+  # Aktifkan, set JR_SEARXNG_URL=http://searxng:8080 di .env, lalu di
+  # ./searxng/settings.yml pastikan format JSON aktif:
+  #   use_default_settings: true
+  #   server: { secret_key: "<acak>", limiter: false }
+  #   search: { formats: [html, json] }
+  # searxng:
+  #   image: searxng/searxng:latest
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./searxng:/etc/searxng
 
   # OPSIONAL — PostgreSQL (default deployment memakai SQLite di volume).
   # Aktifkan lalu set JR_DATABASE_URL di service jenderalrouter.

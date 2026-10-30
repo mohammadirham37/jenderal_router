@@ -35,9 +35,17 @@ const chatGuidelines = `Pedoman menjawab:
 
 const chatToolGuidelines = `Pemakaian tool:
 - Panggil tool bila memang dibutuhkan untuk menjawab dengan benar; jangan untuk hal yang sudah Anda ketahui pasti.
-- web_fetch membaca halaman web publik. Gunakan saat pengguna memberi URL, atau saat butuh informasi terkini dan Anda tahu URL sumber yang tepat. Boleh dipanggil beberapa kali.
-- Hasil tool dari giliran sebelumnya tetap ada di riwayat; pakai ulang, jangan mengambil halaman yang sama lagi tanpa alasan.
-- Saat memakai hasil web, sebutkan sumbernya (judul atau URL). Bila tool gagal, beri tahu pengguna dan jawab sebaik mungkin dari pengetahuan Anda.`
+- Hasil tool dari giliran sebelumnya tetap ada di riwayat; pakai ulang, jangan memanggil ulang dengan argumen yang sama tanpa alasan.
+- Bila tool gagal, beri tahu pengguna singkat lalu jawab sebaik mungkin dari pengetahuan Anda.`
+
+// panduan per tool — hanya tool yang benar-benar dikirim klien yang disebut
+var toolGuides = map[string]string{
+	"web_search":      "- web_search mencari di web. Gunakan untuk berita, data terbaru, harga, jadwal, versi rilis, atau fakta yang tidak Anda ketahui pasti. Tulis kueri singkat dan spesifik; boleh mencari beberapa kali dengan kueri berbeda.",
+	"web_fetch":       "- web_fetch membaca isi lengkap satu halaman web publik. Gunakan saat pengguna memberi URL, atau setelah web_search untuk membaca 1–3 halaman paling relevan bila cuplikan hasil tidak cukup.",
+	"create_document": "- create_document menyiapkan file unduhan (Word/PowerPoint/Excel/CSV). Panggil HANYA bila pengguna jelas meminta file/dokumen/presentasi/spreadsheet. Setelah tool membalas, tulis isi lengkap dokumen sebagai jawaban sesuai format yang diminta tool.",
+}
+
+const chatCiteGuide = "- Saat jawaban memakai informasi dari web, cantumkan sumbernya sebagai tautan Markdown, mis. [Judul](https://...)."
 
 // chatSystemPrompt merakit system prompt untuk satu request chat.
 func (a *App) chatSystemPrompt(u *store.User, tools []translate.Tool, custom string) string {
@@ -58,6 +66,16 @@ func (a *App) chatSystemPrompt(u *store.User, tools []translate.Tool, custom str
 			names = append(names, t.Name)
 		}
 		b.WriteString("\nTool tersedia: " + strings.Join(names, ", ") + ".\n" + chatToolGuidelines + "\n")
+		web := false
+		for _, n := range names {
+			if g, ok := toolGuides[n]; ok {
+				b.WriteString(g + "\n")
+			}
+			web = web || n == "web_search" || n == "web_fetch"
+		}
+		if web {
+			b.WriteString(chatCiteGuide + "\n")
+		}
 	}
 	if c := strings.TrimSpace(custom); c != "" {
 		b.WriteString("\nInstruksi khusus dari pengguna untuk percakapan ini (utamakan):\n" + c + "\n")
