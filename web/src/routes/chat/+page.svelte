@@ -1108,7 +1108,11 @@
 		overflow-y: auto; font-size: 15px; line-height: 1.55; padding: 4px 0; white-space: pre-wrap;
 	}
 	.composer textarea::placeholder { color: var(--muted); }
-	.composer-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+	.composer-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; min-width: 0; }
+	/* dropdown boleh menyusut (teks terpotong) — tombol kirim tidak pernah terdorong keluar */
+	.composer-bar .model-select { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.composer-bar .send, .composer-bar .icon-round, .composer-bar .tool-badge { flex-shrink: 0; }
+	.tool-badge { white-space: nowrap; }
 	.icon-round {
 		all: unset; cursor: pointer; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
 		color: var(--muted); transition: background var(--speed), color var(--speed);
@@ -1205,8 +1209,16 @@
 		.bubble, .user-col { max-width: 88%; }
 		.user-col .bubble { max-width: 100%; }
 		.avatar { display: none; }
-		.composer-wrap { padding: 0 8px 8px; }
-		.model-select { max-width: 150px; }
+		.composer-wrap { padding: 0 8px max(8px, env(safe-area-inset-bottom)); }
+		.composer { padding: 8px 8px 6px 12px; border-radius: 20px; }
+		.composer-bar { gap: 6px; }
+		.model-select { max-width: 46%; }
+		.file-mode { max-width: 34%; }
+		.tool-badge { display: none; }
+		/* < 16px membuat iOS Safari memperbesar halaman saat input difokus */
+		.composer textarea, .edit-box textarea { font-size: 16px; }
+		.att-chip { max-width: 100%; }
+		.att-thumb { max-width: 160px; max-height: 140px; }
 		.jump { bottom: 120px; }
 		.hint { display: none; }
 	}
