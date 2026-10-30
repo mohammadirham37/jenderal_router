@@ -241,35 +241,11 @@ function colIndex(ref: string): number {
 }
 const csvCell = (s: string) => (/[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s);
 
-// ---- format untuk model ----
+// ---- label ----
 const KIND_LABEL: Record<AttachmentKind, string> = {
 	image: 'gambar', pdf: 'PDF', docx: 'Word', xlsx: 'Excel', pptx: 'PowerPoint', text: 'teks'
 };
 export const kindLabel = (k: AttachmentKind) => KIND_LABEL[k];
-
-function docBlock(a: Attachment): string {
-	const attrs = [`nama="${a.name.replace(/"/g, "'")}"`, `jenis="${KIND_LABEL[a.kind]}"`];
-	if (a.pages) attrs.push(`${a.kind === 'pptx' ? 'slide' : a.kind === 'xlsx' ? 'sheet' : 'halaman'}="${a.pages}"`);
-	const note = a.truncated ? '\n[... isi dipotong karena terlalu panjang]' : '';
-	return `<lampiran ${attrs.join(' ')}>\n${a.text ?? ''}${note}\n</lampiran>`;
-}
-
-// userContent merakit isi pesan user untuk model: dokumen di depan
-// pertanyaan; gambar sebagai part vision (atau catatan teks bila
-// withImages=false, untuk giliran lama agar request tidak membengkak).
-export function userContent(text: string, atts: Attachment[] | undefined, withImages: boolean): string | any[] {
-	const list = (atts ?? []).filter((a) => a.status !== 'error' && a.status !== 'reading');
-	if (!list.length) return text;
-	const docs = list.filter((a) => a.kind !== 'image' && a.text);
-	const imgs = list.filter((a) => a.kind === 'image' && a.dataUrl);
-	let body = docs.map(docBlock).join('\n\n');
-	if (imgs.length && !withImages) {
-		body += (body ? '\n\n' : '') + imgs.map((a) => `[gambar terlampir sebelumnya: ${a.name}]`).join('\n');
-	}
-	body += (body ? '\n\n' : '') + (text || (imgs.length ? 'Jelaskan gambar ini.' : 'Pelajari lampiran ini.'));
-	if (!imgs.length || !withImages) return body;
-	return [{ type: 'text', text: body }, ...imgs.map((a) => ({ type: 'image_url', image_url: { url: a.dataUrl } }))];
-}
 
 // bentuk tersimpan di meta pesan (tanpa status sementara)
 export function storedAttachments(atts: Attachment[]): Attachment[] {

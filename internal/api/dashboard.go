@@ -99,6 +99,9 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("GET /api/me/conversations/{id}/export", a.requireSession(a.handleExportConversation, store.RoleMember, false))
 	a.mux.HandleFunc("POST /api/me/conversations/{id}/messages", a.requireSession(a.handleSaveMessage, store.RoleMember, true))
 	a.mux.HandleFunc("DELETE /api/me/conversations/{id}/messages", a.requireSession(a.handleTruncateMessages, store.RoleMember, true))
+	a.mux.HandleFunc("POST /api/me/conversations/{id}/runs", a.requireSession(a.handleStartRun, store.RoleMember, true))
+	a.mux.HandleFunc("GET /api/me/runs/{rid}/events", a.requireSession(a.handleRunEvents, store.RoleMember, false))
+	a.mux.HandleFunc("POST /api/me/runs/{rid}/cancel", a.requireSession(a.handleCancelRun, store.RoleMember, true))
 
 	// playground: model, chat streaming, kuota (F-12)
 	a.mux.HandleFunc("GET /api/me/models", a.requireSession(a.handleMeModels, store.RoleMember, false))

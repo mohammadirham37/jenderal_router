@@ -1,0 +1,1 @@
+import{n as e,r as t}from"./DMYv2urb.js";import{h as n}from"./DHcef2DB.js";var r={name:`square`,size:24,node:[[`rect`,{width:`18`,height:`18`,x:`3`,y:`3`,rx:`2`}]]};r.node;var i=new Set([`$$slots`,`$$events`,`$$legacy`]);function a(a,o){let s=e(o,i);n(a,t(()=>s,{get icon(){return r}}))}export{a as t};

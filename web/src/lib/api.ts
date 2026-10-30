@@ -59,6 +59,35 @@ export const api = {
 	patch: (p: string, b?: any, opts?: any) => request('PATCH', p, b, opts),
 	del: (p: string, opts?: any) => request('DELETE', p, undefined, opts),
 
+	// runEvents mengikuti event run agen chat (SSE) mulai indeks from sampai
+	// [END]; melempar ApiError (dengan status) bila run tidak ditemukan.
+	async runEvents(id: string, from: number, signal: AbortSignal, onEvent: (ev: any) => void) {
+		const res = await fetch(`/api/me/runs/${id}/events?from=${from}`, { credentials: 'same-origin', signal });
+		if (!res.ok || !res.body) {
+			let msg = `HTTP ${res.status}`;
+			try { const j = await res.json(); msg = j.error || msg; } catch { /* */ }
+			throw new ApiError(res.status, msg);
+		}
+		const reader = res.body.getReader();
+		const dec = new TextDecoder();
+		let buf = '';
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) throw new Error('koneksi ke server terputus');
+			buf += dec.decode(value, { stream: true });
+			const parts = buf.split('\n\n');
+			buf = parts.pop() ?? '';
+			for (const part of parts) {
+				for (const line of part.split('\n')) {
+					if (!line.startsWith('data:')) continue;
+					const payload = line.slice(5).trim();
+					if (payload === '[END]') return;
+					onEvent(JSON.parse(payload));
+				}
+			}
+		}
+	},
+
 	// streaming chat playground (konsumsi SSE gaya OpenAI)
 	async chatStream(
 		opts: { model: string; messages: any[]; conversationId?: number | null; temperature?: number; maxTokens?: number; tools?: any[]; signal?: AbortSignal },

@@ -1,0 +1,1 @@
+export{t as component}from"../chunks/Hq965_Za.js";

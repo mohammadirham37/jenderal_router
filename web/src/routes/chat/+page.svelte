@@ -9,7 +9,7 @@
 	import { t, toast } from '#lib/stores.svelte.js';
 	import Modal from '#lib/components/Modal.svelte';
 	import {
-		ACCEPT, MAX_ATTACHMENTS, MAX_IMAGES, kindOf, readAttachment, userContent, storedAttachments, fmtBytes, kindLabel,
+		ACCEPT, MAX_ATTACHMENTS, MAX_IMAGES, kindOf, readAttachment, storedAttachments, fmtBytes, kindLabel,
 		type Attachment
 	} from '#lib/attachments.js';
 
@@ -23,10 +23,9 @@
 		building?: DocType; // dokumen sedang dirakit
 		attachments?: Attachment[]; // lampiran pesan user
 		trimmed?: { n: number; window: number }; // pesan lama yang dipangkas server
+		doc?: { type: DocType; title?: string; start: number }; // dokumen yang dirakit dari jawaban
 	};
-	type ToolCall = { id: string; name: string; args: string };
-	// satu pemanggilan tool dalam giliran assistant; result ikut disimpan agar
-	// pertanyaan lanjutan tetap punya isi halaman yang sudah dibaca
+	// satu pemanggilan tool dalam giliran assistant (dieksekusi server)
 	type ToolUse = {
 		id: string; name: string; args: string; round: number; status: 'run' | 'ok' | 'err'; result?: string;
 		url?: string; query?: string; hits?: number; doc?: DocType;
@@ -68,29 +67,6 @@
 	});
 	const periodLabel = (p: string) => (p === 'month' ? 'bulanan' : 'harian');
 
-	// tool bawaan — web_search & web_fetch dieksekusi server (guard SSRF aktif),
-	// create_document dieksekusi di browser (generator file lokal)
-	const fn = (name: string, description: string, properties: Record<string, any>, required: string[]) =>
-		({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } });
-	const WEB_TOOLS = [
-		fn('web_search', 'Mencari di web dan mengembalikan daftar hasil (judul, URL, cuplikan). Gunakan untuk informasi terkini atau fakta yang tidak diketahui pasti.',
-			{ query: { type: 'string', description: 'Kueri pencarian singkat dan spesifik' } }, ['query']),
-		fn('web_fetch', 'Mengambil isi teks sebuah halaman web publik. Gunakan saat pengguna menyebutkan URL, atau untuk membaca hasil web_search yang relevan.',
-			{ url: { type: 'string', description: 'URL lengkap halaman, mulai dengan http atau https' } }, ['url'])
-	];
-	const DOC_TOOL = fn('create_document',
-		'Menyiapkan file unduhan dari jawaban berikutnya. Panggil hanya bila pengguna meminta file Word/PowerPoint/Excel/CSV, dokumen, laporan, presentasi, atau spreadsheet.',
-		{
-			type: { type: 'string', enum: ['docx', 'pptx', 'xlsx', 'csv'], description: 'docx=Word, pptx=PowerPoint, xlsx=Excel, csv=CSV' },
-			title: { type: 'string', description: 'Judul dokumen' }
-		}, ['type']);
-	const MAX_TOOL_ROUNDS = 6;
-	// hanya N giliran bertool terakhir yang membawa hasil tool ke model —
-	// giliran lebih lama cukup teks jawabannya (hemat konteks)
-	const KEEP_TOOL_TURNS = 3;
-	// gambar giliran lama diganti catatan teks — hanya N giliran bergambar terakhir dikirim utuh
-	const KEEP_IMAGE_TURNS = 2;
-
 	const SUGGESTIONS = [
 		{ title: 'Cari info terkini', text: 'Apa kabar terbaru soal harga beras di Indonesia? Sertakan sumbernya' },
 		{ title: 'Buat presentasi', text: 'Buatkan ppt 6 slide tentang manfaat AI untuk UMKM' },
@@ -130,6 +106,7 @@
 	}
 
 	async function newConversation() {
+		detach();
 		const res = await api.post('/api/me/conversations', { title: t('new_chat'), model });
 		current = res.conversation.id;
 		msgs = [];
@@ -138,26 +115,33 @@
 		inputEl?.focus();
 	}
 	async function openConversation(id: number) {
+		detach();
 		current = id;
 		try {
 			const res = await api.get('/api/me/conversations/' + id);
 			msgs = (res.messages || []).map((m: any) => {
 				const meta = m.meta || {};
 				return {
-					id: m.id, role: m.role, content: m.content, provider: m.provider_name, model: m.model || undefined,
+					id: m.id, role: m.role, content: m.content, provider: m.provider_name, model: m.model ? shortModel(m.model) : undefined,
 					reasoning: meta.reasoning, thinkMs: meta.think_ms, tools: meta.tools, stopped: meta.stopped,
 					attachments: meta.attachments,
-					trimmed: meta.context_trimmed ? { n: meta.context_trimmed, window: meta.context_window } : undefined
+					trimmed: meta.context_trimmed ? { n: meta.context_trimmed, window: meta.context_window } : undefined,
+					doc: meta.doc
 				};
 			});
 			showHistory = false;
 			scrollToBottom(true);
+			// jawaban masih diproses di server → sambung ulang & putar ulang dari awal
+			if (res.active_run) {
+				msgs.push({ role: 'assistant', content: '' });
+				followRun(res.active_run, msgs[msgs.length - 1]);
+			}
 		} catch (e: any) { toast(e.message, 'err'); }
 	}
 	async function delConversation(id: number) {
 		if (!confirm(t('confirm_delete'))) return;
 		await api.del('/api/me/conversations/' + id);
-		if (current === id) { current = null; msgs = []; }
+		if (current === id) { detach(); current = null; msgs = []; }
 		loadConversations();
 	}
 
@@ -268,23 +252,23 @@
 		const m = s.match(/^#{1,3}\s+(.+)/m);
 		return m ? m[1].replace(/^#+\s+/, '').trim() : '';
 	}
-	// markdown: isi dokumen (default seluruh jawaban); fallbackTitle dari argumen tool
-	async function attachGeneratedFile(type: DocType, markdown?: string, fallbackTitle?: string) {
-		const bubble = [...msgs].reverse().find((m) => m.role === 'assistant' && m.content.trim());
-		if (!bubble) return;
-		const body = (markdown ?? bubble.content).trim();
+	// merakit file dari jawaban (bagian sejak b.doc.start) dengan generator lokal
+	async function attachGeneratedFile(b: Msg) {
+		if (!b.doc || b.building) return;
+		const type = b.doc.type;
+		const body = b.content.slice(b.doc.start).trim();
 		if (!body) return;
-		bubble.building = type;
+		b.building = type;
 		scrollToBottom();
 		try {
-			const title = firstH1(body) || fallbackTitle || convTitle();
+			const title = firstH1(body) || b.doc.title || convTitle();
 			// generator membaca judul (#) & subjudul dari markdown untuk sampul/slide judul
 			const blob = await buildDocBlob(type, title, body);
-			bubble.file = { name: docFileName(title, type), url: URL.createObjectURL(blob), size: blob.size, type };
+			b.file = { name: docFileName(title, type), url: URL.createObjectURL(blob), size: blob.size, type };
 		} catch (e: any) {
 			toast('gagal merakit file: ' + e.message, 'err');
 		} finally {
-			bubble.building = undefined;
+			b.building = undefined;
 			scrollToBottom();
 		}
 	}
@@ -387,7 +371,14 @@
 		if (e.dataTransfer?.files.length) addFiles(e.dataTransfer.files);
 	}
 
-	function stop() {
+	// hentikan jawaban di server; event "done" (stopped) menyusul lewat stream
+	async function stop() {
+		if (!runId) return;
+		try { await api.post(`/api/me/runs/${runId}/cancel`); }
+		catch (e: any) { toast(e.message, 'err'); }
+	}
+	// lepas dari stream yang sedang diikuti (pindah percakapan); run tetap berjalan
+	function detach() {
 		abort?.abort();
 	}
 
@@ -435,15 +426,18 @@
 		}
 	}
 
+	// ================= run agen (server) =================
+	// Loop model ↔ tool berjalan di server; browser hanya mengikuti event-nya.
+	// Menutup tab tidak menghentikan jawaban: saat percakapan dibuka lagi UI
+	// menyambung ulang (active_run) dan memutar ulang event dari awal.
+	let runId: string | null = null;
+
 	async function runTurn(text: string, atts: Attachment[]) {
 		sending = true;
 		// mode paksa / deteksi kata kunci → instruksi dokumen sejak awal; selain itu
 		// model sendiri yang memutuskan lewat tool create_document
 		const forcedDoc: DocType | null = fileMode === 'auto' ? detectDocRequest(text) : fileMode === 'none' ? null : fileMode;
-		const tools = forcedDoc || fileMode === 'none' ? WEB_TOOLS : [...WEB_TOOLS, DOC_TOOL];
-		let docType = forcedDoc;
-		let docStart = -1; // dokumen dari tool: isi = teks sejak putaran setelah tool
-		let docTitle = '';
+		const docTool = fileMode !== 'none';
 		fileMode = 'auto';
 		if (!current) {
 			try { await newConversation(); }
@@ -456,170 +450,100 @@
 		msgs.push({ role: 'user', content: text, attachments: atts.length ? atts : undefined });
 		const userMsg = msgs[msgs.length - 1];
 		scrollToBottom(true, true);
-
-		const history: any[] = [];
-		if (forcedDoc) history.push({ role: 'system', content: DOC_SYSTEM[forcedDoc] });
-		history.push(...buildHistory(msgs));
-
-		const started = performance.now();
-		sendStart = started;
-		let quotaSeen = false;
-		abort = new AbortController();
-		const signal = abort.signal;
-
-		// satu bubble per giliran: teks, penalaran, dan tool dari semua putaran menyatu
-		msgs.push({ role: 'assistant', content: '' });
-		const bubble = msgs[msgs.length - 1];
-		target = bubble;
-		scrollToBottom();
-
+		let res: any;
 		try {
-			for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-				if (bubble.content && !bubble.content.endsWith('\n')) bubble.content += '\n\n';
-				const roundStart = bubble.content.length;
-				if (docStart >= 0) docStart = roundStart;
-				let finish = '';
-				const pending: Record<number, ToolCall> = {};
+			res = await api.post(`/api/me/conversations/${current}/runs`, {
+				model, content: text, attachments: atts, forced_doc: forcedDoc ?? '', doc_tool: docTool, doc_prompts: DOC_SYSTEM
+			});
+		} catch (e: any) {
+			// pesan belum tersimpan: kembalikan ke composer agar bisa dikirim ulang
+			msgs.pop();
+			input = text;
+			pending = atts.map((a) => ({ ...a, status: 'ready' as const }));
+			toast(e.message, 'err');
+			sending = false;
+			return;
+		}
+		userMsg.id = res.user_message_id;
+		msgs.push({ role: 'assistant', content: '' });
+		await followRun(res.run_id, msgs[msgs.length - 1]);
+		loadQuota();
+		loadConversations();
+	}
 
-				await api.chatStream(
-					// putaran terakhir tanpa tool: model wajib menyimpulkan jawaban
-					{ model, conversationId: current, messages: history, tools: round < MAX_TOOL_ROUNDS ? tools : undefined, signal },
-					(delta) => queue('content', delta),
-					() => { if (!quotaSeen) { quotaSeen = true; loadQuota(); } },
-					(extra) => {
-						if (extra.reasoning) queue('reasoning', extra.reasoning);
-						if (extra.model) bubble.model = extra.model.split('/').pop()?.replace(/\.gguf$/i, '') || extra.model;
-						if (extra.trimmed) bubble.trimmed = extra.trimmed;
-					},
-					(chunk) => {
-						const d = chunk.choices?.[0]?.delta;
-						if (d?.tool_calls) {
-							for (const tc of d.tool_calls) {
-								const idx = tc.index ?? 0;
-								pending[idx] ??= { id: '', name: '', args: '' };
-								if (tc.id) pending[idx].id = tc.id;
-								if (tc.function?.name) pending[idx].name += tc.function.name;
-								if (tc.function?.arguments) pending[idx].args += tc.function.arguments;
-							}
-						}
-						if (d?.finish_reason) finish = d.finish_reason;
-					}
-				);
-				flushNow();
-				if (bubble.thinkStart && !bubble.thinkMs) bubble.thinkMs = performance.now() - bubble.thinkStart;
-
-				const calls = Object.values(pending).filter((tc) => tc.name);
-				if (finish !== 'tool_calls' || calls.length === 0) break;
-
-				const uses: ToolUse[] = calls.map((tc, k) => {
-					let a: any = {};
-					try { a = JSON.parse(tc.args || '{}') || {}; } catch { /* */ }
-					return {
-						id: tc.id || `call_${round}_${k}`, name: tc.name, args: tc.args, round, status: 'run',
-						url: a.url || undefined, query: a.query || undefined, doc: a.type || undefined
-					};
-				});
-				bubble.tools = (bubble.tools ?? []).concat(uses);
-				const running = bubble.tools.slice(-uses.length); // proksi reaktif → chip ikut berubah
-				history.push({
-					role: 'assistant',
-					content: bubble.content.slice(roundStart).trim() || null,
-					tool_calls: running.map((u) => ({ id: u.id, type: 'function', function: { name: u.name, arguments: u.args || '{}' } }))
-				});
-				scrollToBottom();
-				await Promise.all(running.map(runTool));
-				for (const u of running) history.push({ role: 'tool', tool_call_id: u.id, content: u.result ?? '' });
-				const doc = running.find((u) => u.name === 'create_document' && u.status === 'ok');
-				if (doc?.doc) {
-					docType = doc.doc;
-					docStart = 0; // diganti awal putaran berikutnya
-					try { docTitle = JSON.parse(doc.args || '{}').title || ''; } catch { /* */ }
+	// followRun mengikuti event run sampai selesai; koneksi putus disambung
+	// ulang dari event terakhir yang sudah diterima.
+	async function followRun(id: string, bubble: Msg) {
+		runId = id;
+		sending = true;
+		sendStart = performance.now();
+		target = bubble;
+		const ctrl = new AbortController();
+		abort = ctrl;
+		let seen = 0;
+		let retries = 0;
+		try {
+			for (;;) {
+				try {
+					await api.runEvents(id, seen, ctrl.signal, (ev) => {
+						seen++;
+						retries = 0;
+						applyEvent(bubble, ev);
+					});
+					break; // [END]: run selesai
+				} catch (e: any) {
+					if (ctrl.signal.aborted) return;
+					if (e?.status === 404 || ++retries > 5) throw e;
+					await new Promise((r) => setTimeout(r, 1000 * retries));
 				}
-				scrollToBottom();
 			}
-			await saveTurn(text, atts, userMsg, bubble);
-			if (docType) await attachGeneratedFile(docType, docStart >= 0 ? bubble.content.slice(docStart) : undefined, docTitle);
-			loadQuota();
-			loadConversations();
 		} catch (e: any) {
 			flushNow();
-			if (e?.name === 'AbortError') bubble.stopped = true;
-			else bubble.content += '\n\n**⚠ ' + e.message + '**';
-			for (const u of bubble.tools ?? []) if (u.status === 'run') { u.status = 'err'; u.result = 'ERROR: dibatalkan'; }
-			// simpan best-effort: user + jawaban parsial agar tidak hilang saat refresh
-			if (current && !bubble.id) try { await saveTurn(text, atts, userMsg, bubble); } catch { /* */ }
+			bubble.content += '\n\n**⚠ ' + e.message + '**';
 		} finally {
-			target = null;
-			abort = null;
-			const dur = Math.round((performance.now() - started) / 100) / 10;
-			for (const m of msgs) if (m.role === 'assistant' && !m.ms) m.ms = dur;
-			sending = false;
-			scrollToBottom();
-			inputEl?.focus();
-		}
-	}
-
-	// riwayat untuk model: setiap giliran mengirim teksnya; giliran bertool
-	// terbaru juga mengirim pemanggilan tool + hasilnya (per putaran).
-	function buildHistory(list: Msg[]): any[] {
-		const keep = new Set<Msg>();
-		for (let i = list.length - 1; i >= 0 && keep.size < KEEP_TOOL_TURNS; i--) {
-			if (list[i].role === 'assistant' && list[i].tools?.length) keep.add(list[i]);
-		}
-		const withImages = new Set<Msg>();
-		for (let i = list.length - 1; i >= 0 && withImages.size < KEEP_IMAGE_TURNS; i--) {
-			if (list[i].role === 'user' && list[i].attachments?.some((a) => a.kind === 'image')) withImages.add(list[i]);
-		}
-		const out: any[] = [];
-		for (const m of list) {
-			if (m.role === 'user') out.push({ role: 'user', content: userContent(m.content, m.attachments, withImages.has(m)) });
-			else if (m.role === 'assistant') {
-				if (keep.has(m)) out.push(...toolMessages(m.tools!));
-				if (m.content.trim()) out.push({ role: 'assistant', content: m.content });
+			flushNow();
+			if (target === bubble) target = null;
+			if (runId === id) {
+				runId = null;
+				abort = null;
+				sending = false;
+				inputEl?.focus();
 			}
+			scrollToBottom();
 		}
-		return out;
-	}
-	function toolMessages(tools: ToolUse[]): any[] {
-		const out: any[] = [];
-		for (const r of [...new Set(tools.map((u) => u.round))]) {
-			const done = tools.filter((u) => u.round === r && u.result !== undefined);
-			if (!done.length) continue;
-			out.push({
-				role: 'assistant', content: null,
-				tool_calls: done.map((u) => ({ id: u.id, type: 'function', function: { name: u.name, arguments: u.args || '{}' } }))
-			});
-			for (const u of done) out.push({ role: 'tool', tool_call_id: u.id, content: u.result });
-		}
-		return out;
 	}
 
-	// eksekusi tool; error dikembalikan ke model sebagai teks agar ia bisa menyesuaikan
-	async function runTool(u: ToolUse) {
-		try {
-			if (u.name === 'web_search') {
-				if (!u.query) throw new Error('argumen query wajib');
-				const r = await api.post('/api/me/tools/websearch', { query: u.query });
-				const list: any[] = r.results || [];
-				u.hits = list.length;
-				u.result = list.length
-					? `Hasil pencarian untuk "${u.query}":\n\n` +
-						list.map((x, i) => `${i + 1}. ${x.title}\n   URL: ${x.url}\n   ${x.snippet || ''}`).join('\n\n') +
-						'\n\nBaca halaman yang relevan dengan web_fetch bila cuplikan belum cukup.'
-					: `Tidak ada hasil untuk "${u.query}". Coba kueri lain yang lebih umum.`;
-			} else if (u.name === 'web_fetch') {
-				if (!u.url) throw new Error('argumen url wajib');
-				const r = await api.post('/api/me/tools/webfetch', { url: u.url });
-				u.result = 'Judul: ' + (r.title || '-') + '\nURL: ' + u.url + '\n\n' + r.text;
-			} else if (u.name === 'create_document') {
-				if (!u.doc || !(u.doc in DOC_SYSTEM)) throw new Error('type harus docx, pptx, xlsx, atau csv');
-				u.result = DOC_SYSTEM[u.doc] +
-					'\n\nFile akan dirakit otomatis dari jawabanmu berikutnya. Tulis isi lengkap dokumen sekarang, tanpa memanggil create_document lagi.';
-			} else throw new Error(`tool "${u.name}" tidak dikenal`);
-			u.status = 'ok';
-		} catch (e: any) {
-			u.result = 'ERROR: ' + e.message;
-			u.status = 'err';
+	// "local/qwen2.5-7b.gguf" → "qwen2.5-7b"
+	const shortModel = (m: string) => m.split('/').pop()?.replace(/\.gguf$/i, '') || m;
+
+	function applyEvent(b: Msg, ev: any) {
+		switch (ev.t) {
+			case 'text': queue('content', ev.v); break;
+			case 'reasoning': queue('reasoning', ev.v); break;
+			case 'model': b.model = shortModel(ev.model); break;
+			case 'trimmed': b.trimmed = { n: ev.n, window: ev.window }; break;
+			case 'tool':
+				flushNow();
+				b.tools = [...(b.tools ?? []), ev.tool];
+				scrollToBottom();
+				break;
+			case 'tool_end': {
+				const u = b.tools?.find((x) => x.id === ev.id);
+				if (u) Object.assign(u, { status: ev.status, hits: ev.hits, result: ev.error });
+				break;
+			}
+			case 'done':
+				flushNow();
+				b.content = b.content.trim();
+				if (b.thinkStart && !b.thinkMs) b.thinkMs = performance.now() - b.thinkStart;
+				b.id = ev.message_id;
+				b.stopped = ev.stopped || undefined;
+				if (ev.ms) b.ms = Math.round(ev.ms / 100) / 10;
+				if (ev.doc) {
+					b.doc = ev.doc;
+					attachGeneratedFile(b);
+				}
+				break;
 		}
 	}
 
@@ -636,28 +560,6 @@
 		}
 		const target = u.url || u.name;
 		return err ? `Gagal membaca ${target}` : run ? `Membaca ${target}` : `Dibaca ${target}`;
-	}
-
-	function msgMeta(m: Msg) {
-		const meta: Record<string, any> = {};
-		if (m.reasoning) meta.reasoning = m.reasoning;
-		if (m.thinkMs) meta.think_ms = Math.round(m.thinkMs);
-		if (m.tools?.length) meta.tools = m.tools.map(({ id, name, args, url, query, hits, doc, round, status, result }) => ({ id, name, args, url, query, hits, doc, round, status, result }));
-		if (m.stopped) meta.stopped = true;
-		if (m.trimmed) { meta.context_trimmed = m.trimmed.n; meta.context_window = m.trimmed.window; }
-		return Object.keys(meta).length ? meta : undefined;
-	}
-	async function saveTurn(text: string, atts: Attachment[], userMsg: Msg, bubble: Msg) {
-		if (!userMsg.id) {
-			const r = await api.post(`/api/me/conversations/${current}/messages`, {
-				role: 'user', content: text, meta: atts.length ? { attachments: atts } : undefined
-			});
-			userMsg.id = r.id;
-		}
-		const r = await api.post(`/api/me/conversations/${current}/messages`, {
-			role: 'assistant', content: bubble.content.trim(), model: bubble.model || model, meta: msgMeta(bubble)
-		});
-		bubble.id = r.id;
 	}
 
 	const lastIdx = $derived(msgs.length - 1);
@@ -838,6 +740,14 @@
 										<span class="grow"><b class="shimmer">Menyusun {DOC_LABEL[m.building]}…</b><small>sampul, tata letak, dan gaya diterapkan otomatis</small></span>
 										<span class="spinner dark"></span>
 									</div>
+								{/if}
+								{#if m.doc && !m.file && !m.building && !live}
+									{@const DIcon = FILE_ICONS[m.doc.type]}
+									<button class="file-card make" onclick={() => attachGeneratedFile(m)}>
+										<DIcon size={18} />
+										<span class="grow"><b>Buat {DOC_LABEL[m.doc.type]}</b><small>rakit file dari jawaban ini</small></span>
+										<span class="dl"><Download size={15} /></span>
+									</button>
 								{/if}
 								{#if m.file}
 									{@const FileIcon = FILE_ICONS[m.file.type]}
@@ -1152,6 +1062,7 @@
 		border-radius: 14px; color: var(--text); text-decoration: none;
 		transition: border-color var(--speed), transform var(--speed);
 	}
+	button.file-card { font: inherit; cursor: pointer; text-align: left; width: 100%; }
 	.file-card:hover { border-color: var(--accent); transform: translateY(-1px); }
 	.file-card b { font-size: 12.5px; display: block; word-break: break-all; }
 	.file-card small { color: var(--muted); font-size: 11px; }

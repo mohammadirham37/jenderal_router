@@ -32,6 +32,7 @@ type App struct {
 	captcha   *captcha.Store  // captcha login password
 	localGate *localGate
 	search    websearch.Searcher // tool web_search chat
+	runs      *runManager        // run agen chat server-side
 	mux       *http.ServeMux
 }
 
@@ -63,7 +64,8 @@ func NewApp(cfg *config.Config) (*App, error) {
 		search: websearch.Cached(websearch.New(websearch.Config{
 			SearXNGURL: cfg.SearXNGURL, BraveAPIKey: cfg.BraveAPIKey, TavilyAPIKey: cfg.TavilyAPIKey,
 		}, provider.NewPublicHTTPClient(20*time.Second)), 15*time.Minute, 512),
-		mux: http.NewServeMux(),
+		runs: newRunManager(),
+		mux:  http.NewServeMux(),
 	}
 	a.routes()
 	return a, nil

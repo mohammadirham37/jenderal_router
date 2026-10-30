@@ -173,6 +173,10 @@ func (a *App) handleTruncateMessages(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 404, map[string]string{"error": "percakapan tidak ditemukan"})
 		return
 	}
+	if a.runs.active(id) != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "jawaban masih diproses; hentikan dulu"})
+		return
+	}
 	from, err := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64)
 	if err != nil || from <= 0 {
 		writeJSON(w, 400, map[string]string{"error": "parameter from wajib"})

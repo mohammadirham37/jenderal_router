@@ -63,55 +63,49 @@ func extractTitle(html string) string {
 	return strings.TrimSpace(htmlToText(m[1]))
 }
 
-// handleToolWebFetch POST /api/me/tools/webfetch — {url: "..."}.
-func (a *App) handleToolWebFetch(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		URL string `json:"url"`
-	}
-	if err := decodeBody(w, r, &req); err != nil {
-		writeJSON(w, 400, map[string]string{"error": "body tidak sah"})
-		return
-	}
-	target := strings.TrimSpace(req.URL)
+// errFetch error web_fetch yang aman ditampilkan ke pengguna/model.
+type errFetch struct {
+	status int
+	msg    string
+}
+
+func (e *errFetch) Error() string { return e.msg }
+
+// fetchPage mengambil halaman publik lalu mengubahnya menjadi teks
+// (dipakai endpoint tool dan agen chat server-side).
+func (a *App) fetchPage(ctx context.Context, target string) (title, text string, err error) {
+	target = strings.TrimSpace(target)
 	if target == "" {
-		writeJSON(w, 400, map[string]string{"error": "url wajib"})
-		return
+		return "", "", &errFetch{400, "url wajib"}
 	}
 	// guard SSRF: tolak host internal/loopback/private — tool ini hanya
 	// untuk membaca situs publik, bukan service internal server.
 	if err := provider.CheckBaseURL(target, false, false); err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
-		return
+		return "", "", &errFetch{400, err.Error()}
 	}
-
 	// klien publik: IP diperiksa saat dial (redirect & DNS rebinding ikut terjaga)
 	client := provider.NewPublicHTTPClient(30 * time.Second)
-	req2, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": "URL tidak sah: " + err.Error()})
-		return
+		return "", "", &errFetch{400, "URL tidak sah: " + err.Error()}
 	}
-	req2.Header.Set("User-Agent", "Mozilla/5.0 (compatible; JenderalRouterBot/1.0; +webfetch tool)")
-	resp, err := client.Do(req2)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; JenderalRouterBot/1.0; +webfetch tool)")
+	resp, err := client.Do(req)
 	if err != nil {
 		msg := "gagal mengakses situs"
 		if errors.Is(err, provider.ErrSSRFBlocked) {
 			msg = "alamat internal/privat tidak diizinkan"
 		}
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": msg})
-		return
+		return "", "", &errFetch{http.StatusBadGateway, msg}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error": fmt.Sprintf("situs merespons HTTP %d", resp.StatusCode)})
-		return
+		return "", "", &errFetch{http.StatusBadGateway, fmt.Sprintf("situs merespons HTTP %d", resp.StatusCode)}
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512<<10))
 	ct := strings.ToLower(resp.Header.Get("Content-Type"))
-	text := string(raw)
+	text = string(raw)
 	isHTML := strings.Contains(ct, "html") || strings.HasPrefix(strings.TrimSpace(text), "<")
-	title := ""
 	if isHTML {
 		title = extractTitle(text)
 		text = htmlToText(text)
@@ -122,10 +116,47 @@ func (a *App) handleToolWebFetch(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(text) == "" {
 		text = "(halaman tidak memiliki teks yang bisa dibaca)"
 	}
+	return title, text, nil
+}
+
+// handleToolWebFetch POST /api/me/tools/webfetch — {url: "..."}.
+func (a *App) handleToolWebFetch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := decodeBody(w, r, &req); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "body tidak sah"})
+		return
+	}
+	target := strings.TrimSpace(req.URL)
+	title, text, err := a.fetchPage(r.Context(), target)
+	if err != nil {
+		status := http.StatusBadGateway
+		var fe *errFetch
+		if errors.As(err, &fe) {
+			status = fe.status
+		}
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return
+	}
 	a.audit(r, "tool.webfetch", target, nil, map[string]int{"chars": len([]rune(text))})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url": target, "title": title, "chars": len([]rune(text)), "text": text,
 	})
+}
+
+// searchError pesan error pencarian yang ramah untuk pengguna/model.
+func (a *App) searchError(err error) string {
+	msg := "pencarian gagal"
+	switch {
+	case errors.Is(err, provider.ErrSSRFBlocked):
+		msg = "alamat internal/privat tidak diizinkan"
+	case errors.Is(err, websearch.ErrRateLimited) && a.search.Name() == "brave-html":
+		msg += ": " + err.Error() + ". Admin dapat mengatur JR_SEARXNG_URL atau JR_BRAVE_API_KEY agar pencarian lebih andal"
+	case !errors.Is(err, context.Canceled):
+		msg += ": " + err.Error()
+	}
+	return msg
 }
 
 // handleToolWebSearch POST /api/me/tools/websearch — {query, count}.
@@ -151,15 +182,7 @@ func (a *App) handleToolWebSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	results, err := a.search.Search(r.Context(), q, req.Count)
 	if err != nil {
-		msg := "pencarian gagal"
-		if errors.Is(err, provider.ErrSSRFBlocked) {
-			msg = "alamat internal/privat tidak diizinkan"
-		} else if errors.Is(err, websearch.ErrRateLimited) && a.search.Name() == "brave-html" {
-			msg += ": " + err.Error() + ". Admin dapat mengatur JR_SEARXNG_URL atau JR_BRAVE_API_KEY agar pencarian lebih andal"
-		} else if !errors.Is(err, context.Canceled) {
-			msg += ": " + err.Error()
-		}
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": msg})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": a.searchError(err)})
 		return
 	}
 	a.audit(r, "tool.websearch", q, nil, map[string]any{"backend": a.search.Name(), "results": len(results)})

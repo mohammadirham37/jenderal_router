@@ -62,7 +62,11 @@ func (a *App) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"conversation": c, "messages": msgs})
+	resp := map[string]any{"conversation": c, "messages": msgs}
+	if run := a.runs.active(id); run != nil {
+		resp["active_run"] = run.ID // UI menyambung ulang ke jawaban yang masih diproses
+	}
+	writeJSON(w, 200, resp)
 }
 
 func (a *App) handleUpdateConversation(w http.ResponseWriter, r *http.Request) {
