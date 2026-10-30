@@ -1,13 +1,17 @@
 <script lang="ts">
 	import {
 		Plus, ArrowUp, Square, Trash2, Sparkles, History, Globe, Activity, Gauge, Download, FileText,
-		Presentation, Sheet, Table, Copy, Check, ArrowDown, ChevronRight, Brain, Bot, Search
+		Presentation, Sheet, Table, Copy, Check, ArrowDown, ChevronRight, Brain, Bot, Search, Paperclip, X, Image as ImageIcon, Upload
 	} from '@lucide/svelte';
 	import { api, md, fmtTs, fmtNum } from '#lib/api.js';
 	import { copyText } from '#lib/clipboard.js';
 	import { exportAnswer, exportConversation, detectDocRequest, DOC_SYSTEM, buildDocBlob, docFileName, type ExportFormat, type DocType } from '#lib/exporters.js';
 	import { t, toast } from '#lib/stores.svelte.js';
 	import Modal from '#lib/components/Modal.svelte';
+	import {
+		ACCEPT, MAX_ATTACHMENTS, MAX_IMAGES, kindOf, readAttachment, userContent, storedAttachments, fmtBytes, kindLabel,
+		type Attachment
+	} from '#lib/attachments.js';
 
 	type Msg = {
 		role: 'user' | 'assistant' | 'tool'; content: string; provider?: string;
@@ -16,6 +20,7 @@
 		tools?: ToolUse[];
 		file?: { name: string; url: string; size: number; type: DocType };
 		building?: DocType; // dokumen sedang dirakit
+		attachments?: Attachment[]; // lampiran pesan user
 	};
 	type ToolCall = { id: string; name: string; args: string };
 	// satu pemanggilan tool dalam giliran assistant; result ikut disimpan agar
@@ -81,6 +86,8 @@
 	// hanya N giliran bertool terakhir yang membawa hasil tool ke model —
 	// giliran lebih lama cukup teks jawabannya (hemat konteks)
 	const KEEP_TOOL_TURNS = 3;
+	// gambar giliran lama diganti catatan teks — hanya N giliran bergambar terakhir dikirim utuh
+	const KEEP_IMAGE_TURNS = 2;
 
 	const SUGGESTIONS = [
 		{ title: 'Cari info terkini', text: 'Apa kabar terbaru soal harga beras di Indonesia? Sertakan sumbernya' },
@@ -136,7 +143,8 @@
 				const meta = m.meta || {};
 				return {
 					role: m.role, content: m.content, provider: m.provider_name, model: m.model || undefined,
-					reasoning: meta.reasoning, thinkMs: meta.think_ms, tools: meta.tools, stopped: meta.stopped
+					reasoning: meta.reasoning, thinkMs: meta.think_ms, tools: meta.tools, stopped: meta.stopped,
+					attachments: meta.attachments
 				};
 			});
 			showHistory = false;
@@ -330,15 +338,68 @@
 		inputEl?.focus();
 	}
 
+	// ================= lampiran =================
+	let pending = $state<Attachment[]>([]);
+	let fileEl = $state<HTMLInputElement | null>(null);
+	let dragging = $state(false);
+	const modelInfo = $derived(models.find((x) => x.id === model));
+	const readyAtts = $derived(pending.filter((a) => a.status === 'ready'));
+	const readingAtts = $derived(pending.some((a) => a.status === 'reading'));
+
+	function addFiles(files: Iterable<File>) {
+		for (const file of files) {
+			if (pending.length >= MAX_ATTACHMENTS) { toast(`maksimal ${MAX_ATTACHMENTS} lampiran per pesan`, 'err'); break; }
+			const kind = kindOf(file);
+			if (!kind) { toast(`${file.name}: jenis file tidak didukung`, 'err'); continue; }
+			if (kind === 'image' && pending.filter((a) => a.kind === 'image').length >= MAX_IMAGES) {
+				toast(`maksimal ${MAX_IMAGES} gambar per pesan`, 'err');
+				continue;
+			}
+			pending.push({ id: crypto.randomUUID(), name: file.name, size: file.size, kind, status: 'reading' });
+			const att = pending[pending.length - 1];
+			readAttachment(file, kind)
+				.then((r) => Object.assign(att, r, { status: 'ready' }))
+				.catch((e) => Object.assign(att, { status: 'error', error: e?.message || String(e) }));
+		}
+		inputEl?.focus();
+	}
+	function removeAttachment(id: string) {
+		pending = pending.filter((a) => a.id !== id);
+	}
+	function onPaste(e: ClipboardEvent) {
+		const files = Array.from(e.clipboardData?.files ?? []);
+		if (files.length) { e.preventDefault(); addFiles(files); }
+	}
+	function onDragOver(e: DragEvent) {
+		if (!e.dataTransfer?.types.includes('Files')) return;
+		e.preventDefault();
+		dragging = true;
+	}
+	function onDragLeave(e: DragEvent) {
+		if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) dragging = false;
+	}
+	function onDrop(e: DragEvent) {
+		e.preventDefault();
+		dragging = false;
+		if (e.dataTransfer?.files.length) addFiles(e.dataTransfer.files);
+	}
+
 	function stop() {
 		abort?.abort();
 	}
 
 	async function send() {
 		const text = input.trim();
-		if (!text || sending) return;
+		if ((!text && !readyAtts.length) || sending) return;
+		if (readingAtts) { toast('tunggu lampiran selesai dibaca', 'err'); return; }
+		if (readyAtts.some((a) => a.kind === 'image') && modelInfo?.vision === false) {
+			toast(`model ${model} tidak bisa membaca gambar — pilih model vision atau hapus gambar`, 'err');
+			return;
+		}
+		const atts = storedAttachments(pending);
 		sending = true;
 		input = '';
+		pending = [];
 		// mode paksa / deteksi kata kunci → instruksi dokumen sejak awal; selain itu
 		// model sendiri yang memutuskan lewat tool create_document
 		const forcedDoc: DocType | null = fileMode === 'auto' ? detectDocRequest(text) : fileMode === 'none' ? null : fileMode;
@@ -355,7 +416,7 @@
 				return;
 			}
 		}
-		msgs.push({ role: 'user', content: text });
+		msgs.push({ role: 'user', content: text, attachments: atts.length ? atts : undefined });
 		scrollToBottom(true, true);
 
 		const history: any[] = [];
@@ -437,7 +498,7 @@
 				}
 				scrollToBottom();
 			}
-			await saveTurn(text, bubble);
+			await saveTurn(text, atts, bubble);
 			if (docType) await attachGeneratedFile(docType, docStart >= 0 ? bubble.content.slice(docStart) : undefined, docTitle);
 			loadQuota();
 			loadConversations();
@@ -447,7 +508,7 @@
 			else bubble.content += '\n\n**⚠ ' + e.message + '**';
 			for (const u of bubble.tools ?? []) if (u.status === 'run') { u.status = 'err'; u.result = 'ERROR: dibatalkan'; }
 			// simpan best-effort: user + jawaban parsial agar tidak hilang saat refresh
-			if (current) try { await saveTurn(text, bubble); } catch { /* */ }
+			if (current) try { await saveTurn(text, atts, bubble); } catch { /* */ }
 		} finally {
 			target = null;
 			abort = null;
@@ -466,9 +527,13 @@
 		for (let i = list.length - 1; i >= 0 && keep.size < KEEP_TOOL_TURNS; i--) {
 			if (list[i].role === 'assistant' && list[i].tools?.length) keep.add(list[i]);
 		}
+		const withImages = new Set<Msg>();
+		for (let i = list.length - 1; i >= 0 && withImages.size < KEEP_IMAGE_TURNS; i--) {
+			if (list[i].role === 'user' && list[i].attachments?.some((a) => a.kind === 'image')) withImages.add(list[i]);
+		}
 		const out: any[] = [];
 		for (const m of list) {
-			if (m.role === 'user') out.push({ role: 'user', content: m.content });
+			if (m.role === 'user') out.push({ role: 'user', content: userContent(m.content, m.attachments, withImages.has(m)) });
 			else if (m.role === 'assistant') {
 				if (keep.has(m)) out.push(...toolMessages(m.tools!));
 				if (m.content.trim()) out.push({ role: 'assistant', content: m.content });
@@ -542,8 +607,10 @@
 		if (m.stopped) meta.stopped = true;
 		return Object.keys(meta).length ? meta : undefined;
 	}
-	async function saveTurn(text: string, bubble: Msg) {
-		await api.post(`/api/me/conversations/${current}/messages`, { role: 'user', content: text });
+	async function saveTurn(text: string, atts: Attachment[], bubble: Msg) {
+		await api.post(`/api/me/conversations/${current}/messages`, {
+			role: 'user', content: text, meta: atts.length ? { attachments: atts } : undefined
+		});
 		await api.post(`/api/me/conversations/${current}/messages`, {
 			role: 'assistant', content: bubble.content.trim(), model: bubble.model || model, meta: msgMeta(bubble)
 		});
@@ -589,7 +656,11 @@
 		{/if}
 	</div>
 
-	<div class="chat-shell">
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="chat-shell" ondragover={onDragOver} ondragleave={onDragLeave} ondrop={onDrop}>
+		{#if dragging}
+			<div class="drop-overlay" aria-hidden="true"><Upload size={26} /><b>Lepaskan file di sini</b><span>Gambar, PDF, Word, Excel, PowerPoint, atau file teks/kode</span></div>
+		{/if}
 		<div
 			class="scroller"
 			bind:this={msgsEl}
@@ -620,7 +691,24 @@
 				{#each msgs as m, i (i)}
 					{#if m.role === 'user'}
 						<div class="turn user">
-							<div class="bubble">{m.content}</div>
+							<div class="user-col">
+								{#if m.attachments?.length}
+									<div class="att-list sent">
+										{#each m.attachments as a (a.id)}
+											{#if a.kind === 'image' && a.dataUrl}
+												<img class="att-thumb" src={a.dataUrl} alt={a.name} title={a.name} />
+											{:else}
+												<span class="att-chip" title={a.truncated ? 'Isi dipotong karena terlalu panjang' : a.name}>
+													<FileText size={14} />
+													<span class="att-name">{a.name}</span>
+													<small>{kindLabel(a.kind)}{a.pages ? ` · ${a.pages} ${a.kind === 'pptx' ? 'slide' : a.kind === 'xlsx' ? 'sheet' : 'hlm'}` : ''}</small>
+												</span>
+											{/if}
+										{/each}
+									</div>
+								{/if}
+								{#if m.content}<div class="bubble">{m.content}</div>{/if}
+							</div>
 						</div>
 					{:else if m.role === 'assistant'}
 						{@const live = sending && i === lastIdx}
@@ -725,17 +813,46 @@
 
 		<div class="composer-wrap">
 			<div class="composer">
+				{#if pending.length}
+					<div class="att-list">
+						{#each pending as a (a.id)}
+							<span class="att-chip" class:err={a.status === 'error'} class:img={a.kind === 'image' && a.dataUrl}
+								title={a.status === 'error' ? `${a.name}: ${a.error}` : a.truncated ? `${a.name} — isi dipotong karena terlalu panjang` : a.name}>
+								{#if a.kind === 'image' && a.dataUrl}
+									<img src={a.dataUrl} alt="" />
+								{:else if a.status === 'reading'}
+									<span class="spinner dark"></span>
+								{:else if a.kind === 'image'}
+									<ImageIcon size={14} />
+								{:else}
+									<FileText size={14} />
+								{/if}
+								<span class="att-name">{a.name}</span>
+								<small>
+									{#if a.status === 'reading'}membaca…{:else if a.status === 'error'}gagal{:else}{fmtBytes(a.size)}{a.pages ? ` · ${a.pages} ${a.kind === 'pptx' ? 'slide' : a.kind === 'xlsx' ? 'sheet' : 'hlm'}` : ''}{a.truncated ? ' · dipotong' : ''}{/if}
+								</small>
+								<button class="att-x" onclick={() => removeAttachment(a.id)} aria-label={'hapus ' + a.name}><X size={12} /></button>
+							</span>
+						{/each}
+					</div>
+				{/if}
 				<textarea
 					bind:this={inputEl}
 					bind:value={input}
 					rows="1"
 					placeholder="Kirim pesan…"
 					aria-label="Pesan"
+					onpaste={onPaste}
 					onkeydown={(e) => {
 						if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
 					}}
 				></textarea>
 				<div class="composer-bar">
+					<input bind:this={fileEl} type="file" multiple accept={ACCEPT} hidden
+						onchange={(e) => { const el = e.currentTarget; if (el.files) addFiles(el.files); el.value = ''; }} />
+					<button class="icon-round" onclick={() => fileEl?.click()} title="Lampirkan file (gambar, PDF, Word, Excel, PowerPoint, teks/kode) — bisa juga seret atau tempel" aria-label="Lampirkan file">
+						<Paperclip size={16} />
+					</button>
 					<select bind:value={model} class="model-select" aria-label="Model">
 						{#each models as mo (mo.id)}
 							<option value={mo.id}>{mo.id}{mo.local ? ' · lokal' : ''}</option>
@@ -750,7 +867,7 @@
 					{#if sending}
 						<button class="send stop" onclick={stop} title="Hentikan jawaban" aria-label="Hentikan"><Square size={13} fill="currentColor" /></button>
 					{:else}
-						<button class="send" onclick={send} disabled={!input.trim()} title={t('send')} aria-label={t('send')}><ArrowUp size={17} /></button>
+						<button class="send" onclick={send} disabled={(!input.trim() && !readyAtts.length) || readingAtts} title={t('send')} aria-label={t('send')}><ArrowUp size={17} /></button>
 					{/if}
 				</div>
 			</div>
@@ -1005,6 +1122,38 @@
 	}
 	.composer textarea::placeholder { color: var(--muted); }
 	.composer-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+	.icon-round {
+		all: unset; cursor: pointer; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+		color: var(--muted); transition: background var(--speed), color var(--speed);
+	}
+	.icon-round:hover { background: var(--surface-2); color: var(--text); }
+
+	/* ---------- lampiran ---------- */
+	.att-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+	.att-list.sent { justify-content: flex-end; margin: 0 0 6px; }
+	.att-chip {
+		display: inline-flex; align-items: center; gap: 7px; max-width: 280px; padding: 5px 6px 5px 9px;
+		border-radius: 12px; font-size: 12.5px; background: var(--surface-2); border: 1px solid var(--border);
+	}
+	.att-list.sent .att-chip { padding-right: 10px; }
+	.att-chip.err { color: var(--err); border-color: color-mix(in srgb, var(--err) 35%, var(--border)); }
+	.att-chip img { width: 28px; height: 28px; object-fit: cover; border-radius: 6px; }
+	.att-chip .spinner { width: 13px; height: 13px; }
+	.att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+	.att-chip small { color: var(--muted); white-space: nowrap; font-size: 11px; }
+	.att-x { all: unset; cursor: pointer; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: var(--muted); }
+	.att-x:hover { background: var(--surface); color: var(--text); }
+	.att-thumb { max-width: 220px; max-height: 180px; border-radius: 12px; border: 1px solid var(--border); object-fit: cover; }
+	/* lebar dibatasi di kolom (bukan bubble) agar bubble pendek tidak terlipat */
+	.user-col { display: flex; flex-direction: column; align-items: flex-end; max-width: min(80%, 760px); min-width: 0; }
+	.user-col .bubble { max-width: 100%; }
+	.drop-overlay {
+		position: absolute; inset: 8px; z-index: 30; border-radius: 14px; pointer-events: none;
+		display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+		border: 2px dashed color-mix(in srgb, var(--accent) 60%, transparent);
+		background: color-mix(in srgb, var(--surface) 88%, transparent); color: var(--text); font-size: 13px;
+	}
+	.drop-overlay span { color: var(--muted); font-size: 12px; }
 	.model-select {
 		width: auto; max-width: 260px; font-size: 12px; padding: 4px 8px; border-radius: 999px;
 		background: var(--surface-2); border: 1px solid var(--border);
@@ -1058,7 +1207,8 @@
 		.chat-toolbar .lbl, .quota-chip.req { display: none; }
 		.thread { padding: 18px 12px 30px; }
 		.suggest { grid-template-columns: 1fr; }
-		.bubble { max-width: 88%; }
+		.bubble, .user-col { max-width: 88%; }
+		.user-col .bubble { max-width: 100%; }
 		.avatar { display: none; }
 		.composer-wrap { padding: 0 8px 8px; }
 		.model-select { max-width: 150px; }

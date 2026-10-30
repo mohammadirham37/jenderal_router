@@ -48,3 +48,19 @@ func TestToolWebSearch(t *testing.T) {
 		t.Errorf("missing CSRF accepted")
 	}
 }
+
+func TestMeModelsVisionAndChatBodyLimit(t *testing.T) {
+	app, st, _ := appTestEnv(t)
+	seedMockProvider(t, st, "Mock", "mk", "http://127.0.0.1:1") // model mock: Vision=true
+	cookie, csrf := loginAs(app, t, "dev@test", "Sandi-Kuat-123")
+	if w := dashReq(app, "GET", "/api/me/models", nil, cookie, ""); !strings.Contains(w.Body.String(), `"vision":true`) {
+		t.Fatalf("models harus memuat flag vision: %s", w.Body.String())
+	}
+	big := strings.Repeat("a", maxChatBody)
+	w := dashReq(app, "POST", "/api/me/chat", map[string]any{
+		"model": "mk/mock-model", "messages": []map[string]string{{"role": "user", "content": big}},
+	}, cookie, csrf)
+	if w.Code != 413 {
+		t.Fatalf("body > batas harus 413, dapat %d %.200s", w.Code, w.Body.String())
+	}
+}

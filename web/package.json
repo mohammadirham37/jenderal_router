@@ -16,6 +16,7 @@
     "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "docx": "^9.15.0",
     "jszip": "^3.10.2",
+    "pdfjs-dist": "^6.4.299",
     "pptxgenjs": "^4.0.1",
     "svelte": "^5.57.3",
     "svelte-check": "^4.7.7",

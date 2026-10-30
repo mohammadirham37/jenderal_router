@@ -15,7 +15,7 @@ Terinspirasi [9Router](https://github.com/decolua/9router), dirancang **multi-us
 | 👥 Multi-user & RBAC | `super_admin`, `admin`, `member`, `viewer`; API key `jr-…` (hash SHA-256, tampil sekali) |
 | 📊 Kuota & rate limit | Token/request/biaya per hari & bulan (zona waktu bisa diatur, default Asia/Jakarta), RPM/TPM per key, IP allowlist |
 | 📈 Log & analitik | Log request asinkron (tanpa isi prompt secara default), estimasi biaya, grafik, ekspor CSV, `/metrics` Prometheus |
-| 🖥️ Dashboard + Chat | Admin dashboard lengkap + chat playground dengan streaming, riwayat, markdown, dark/light, ID/EN |
+| 🖥️ Dashboard + Chat | Admin dashboard lengkap + chat playground dengan streaming, riwayat, markdown, dark/light, ID/EN; agen chat dengan tool web_search/web_fetch/create_document dan lampiran (gambar, PDF, Word, Excel, PowerPoint, teks/kode) |
 | 🔒 Keamanan | Argon2id, AES-256-GCM untuk secret provider, cookie HttpOnly/Secure/SameSite=Strict + CSRF, rate limit login, SSRF guard, wizard tanpa password bawaan |
 
 ## Instalasi di Server Ubuntu (22.04 / 24.04 / 26.04)

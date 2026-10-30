@@ -29,13 +29,16 @@ func (a *App) handleMeModels(w http.ResponseWriter, r *http.Request) {
 		Kind  string `json:"kind"` // model|combo
 		Owner string `json:"owner"`
 		Local bool   `json:"local"`
+		// Vision kapabilitas gambar model; nil untuk combo (tergantung langkah)
+		Vision *bool `json:"vision,omitempty"`
 	}
 	entries := []entry{}
 	for _, m := range models {
 		if !m.ChatEnabled {
 			continue
 		}
-		entries = append(entries, entry{ID: modelDisplayID(m), Kind: "model", Owner: m.ProviderName, Local: m.ProviderType == "llamastash"})
+		vision := m.Capabilities.Vision
+		entries = append(entries, entry{ID: modelDisplayID(m), Kind: "model", Owner: m.ProviderName, Local: m.ProviderType == "llamastash", Vision: &vision})
 	}
 	if combos, err := a.st.ListCombos(); err == nil {
 		for _, c := range combos {
@@ -110,8 +113,9 @@ func (a *App) handleMeAPIModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"models": out})
 }
 
-// maxMessageMeta batas metadata per pesan (penalaran + hasil tool).
-const maxMessageMeta = 512 << 10
+// maxMessageMeta batas metadata per pesan (penalaran, hasil tool, lampiran:
+// teks dokumen hasil ekstraksi + gambar yang sudah dikecilkan).
+const maxMessageMeta = 6 << 20
 
 // handleSaveMessage menyimpan pesan riwayat percakapan (FR-7.2).
 func (a *App) handleSaveMessage(w http.ResponseWriter, r *http.Request) {
@@ -154,13 +158,21 @@ func (a *App) handleSaveMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"ok": "true"})
 }
 
+// maxChatBody batas body request chat dashboard.
+const maxChatBody = 32 << 20
+
 // handleMeChat proxy chat playground: auth sesi → pipeline inferensi yang
 // sama dengan /v1, stream SSE format OpenAI (dikonsumsi api.js).
 func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 	ai := authFrom(r)
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	// riwayat chat bisa membawa lampiran (teks dokumen + gambar) → batas lebih longgar
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxChatBody+1))
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": "baca body gagal"})
+		return
+	}
+	if len(raw) > maxChatBody {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "percakapan terlalu besar (lampiran terlalu banyak); mulai chat baru"})
 		return
 	}
 	// body berformat OpenAI chat (content string/array) → parser toleran
