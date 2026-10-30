@@ -103,6 +103,9 @@ func TestHTTPErrorSurfaced(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer srv.Close()
+	old := braveHTMLURL
+	braveHTMLURL = srv.URL // cadangan ikut gagal → error diteruskan
+	defer func() { braveHTMLURL = old }()
 	if _, err := New(Config{SearXNGURL: srv.URL}, nil).Search(context.Background(), "q", 5); err == nil {
 		t.Fatal("want error on HTTP 503")
 	}
@@ -150,5 +153,28 @@ func TestRateLimitedError(t *testing.T) {
 	_, err := New(Config{}, srv.Client()).Search(context.Background(), "q", 3)
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("err = %v, want ErrRateLimited", err)
+	}
+}
+
+func TestChainFallsBackToBraveHTML(t *testing.T) {
+	searx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer searx.Close()
+	bh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<div data-type="web"><a href="https://b.test/x">` +
+			`<div class="title" title="Cadangan">c</div></a><div class="content">isi</div></div>`))
+	}))
+	defer bh.Close()
+	old := braveHTMLURL
+	braveHTMLURL = bh.URL
+	defer func() { braveHTMLURL = old }()
+	s := New(Config{SearXNGURL: searx.URL}, bh.Client())
+	rs, err := s.Search(context.Background(), "q", 3)
+	if err != nil || len(rs) != 1 || rs[0].URL != "https://b.test/x" {
+		t.Fatalf("fallback results = %+v, err %v", rs, err)
+	}
+	if s.Name() != "searxng" {
+		t.Errorf("chain name = %s", s.Name())
 	}
 }

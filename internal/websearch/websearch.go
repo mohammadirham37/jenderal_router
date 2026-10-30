@@ -49,20 +49,52 @@ var (
 // halaman HTML Brave menolak UA bot, jadi pakai UA browser umum
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 
-// New memilih backend sesuai konfigurasi. client dipakai untuk API publik
-// (Brave/Tavily/Brave HTML); SearXNG dikonfigurasi admin dan boleh berada
-// di jaringan privat, jadi memakai klien biasa.
+// New menyusun backend sesuai konfigurasi dengan urutan SearXNG → Brave API
+// → Tavily, lalu halaman HTML Brave sebagai cadangan terakhir: bila satu
+// backend gagal atau tanpa hasil, backend berikutnya dicoba. client dipakai
+// untuk API publik; SearXNG dikonfigurasi admin dan boleh berada di jaringan
+// privat, jadi memakai klien biasa.
 func New(cfg Config, client *http.Client) Searcher {
-	switch {
-	case cfg.SearXNGURL != "":
-		return &searxng{base: strings.TrimRight(cfg.SearXNGURL, "/"), client: &http.Client{Timeout: 20 * time.Second}}
-	case cfg.BraveAPIKey != "":
-		return &brave{key: cfg.BraveAPIKey, client: client}
-	case cfg.TavilyAPIKey != "":
-		return &tavily{key: cfg.TavilyAPIKey, client: client}
-	default:
-		return &braveHTML{client: client}
+	if client == nil {
+		client = &http.Client{Timeout: 20 * time.Second}
 	}
+	var list []Searcher
+	if cfg.SearXNGURL != "" {
+		list = append(list, &searxng{base: strings.TrimRight(cfg.SearXNGURL, "/"), client: &http.Client{Timeout: 20 * time.Second}})
+	}
+	if cfg.BraveAPIKey != "" {
+		list = append(list, &brave{key: cfg.BraveAPIKey, client: client})
+	}
+	if cfg.TavilyAPIKey != "" {
+		list = append(list, &tavily{key: cfg.TavilyAPIKey, client: client})
+	}
+	list = append(list, &braveHTML{client: client})
+	if len(list) == 1 {
+		return list[0]
+	}
+	return chain(list)
+}
+
+// chain mencoba backend berurutan sampai ada yang memberi hasil.
+type chain []Searcher
+
+func (c chain) Name() string { return c[0].Name() }
+
+func (c chain) Search(ctx context.Context, q string, n int) ([]Result, error) {
+	var lastErr error
+	for _, s := range c {
+		rs, err := s.Search(ctx, q, n)
+		if err == nil && len(rs) > 0 {
+			return rs, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err != nil {
+			lastErr = fmt.Errorf("%s: %w", s.Name(), err)
+		}
+	}
+	return nil, lastErr // nil bila semua backend sukses tanpa hasil
 }
 
 // ErrRateLimited mesin pencari menolak karena terlalu banyak permintaan.
