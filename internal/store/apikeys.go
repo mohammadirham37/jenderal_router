@@ -25,6 +25,7 @@ type APIKey struct {
 	RevokedAt     string   `json:"revoked_at"`
 	CreatedAt     string   `json:"created_at"`
 	AllowedList   []string `json:"allowed_list,omitempty"` // hasil parse AllowedModels
+	LogContent    bool     `json:"log_content"`            // isi request key ini dicatat
 }
 
 // CreateAPIKey membuat key baru; plaintext dikembalikan hanya sekali.
@@ -50,9 +51,9 @@ func (s *Store) CreateAPIKey(userID int64, name string, plain, hash, secretEnc s
 func (s *Store) GetAPIKey(id int64) (*APIKey, error) {
 	k := &APIKey{}
 	err := s.DB.QueryRow(`SELECT id, user_id, prefix, key_hash, secret_enc, name, allowed_models, ip_allowlist,
-		rpm, tpm, expires_at, revoked_at, created_at FROM api_keys WHERE id = ?`, id).
+		rpm, tpm, expires_at, revoked_at, created_at, log_content FROM api_keys WHERE id = ?`, id).
 		Scan(&k.ID, &k.UserID, &k.Prefix, &k.KeyHash, &k.SecretEnc, &k.Name, &k.AllowedModels, &k.IPAllowlist,
-			&k.RPM, &k.TPM, &k.ExpiresAt, &k.RevokedAt, &k.CreatedAt)
+			&k.RPM, &k.TPM, &k.ExpiresAt, &k.RevokedAt, &k.CreatedAt, &k.LogContent)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -68,9 +69,9 @@ func (s *Store) GetAPIKey(id int64) (*APIKey, error) {
 func (s *Store) GetAPIKeyByHash(hash string) (*APIKey, error) {
 	k := &APIKey{}
 	err := s.DB.QueryRow(`SELECT id, user_id, prefix, key_hash, secret_enc, name, allowed_models, ip_allowlist,
-		rpm, tpm, expires_at, revoked_at, created_at FROM api_keys WHERE key_hash = ?`, hash).
+		rpm, tpm, expires_at, revoked_at, created_at, log_content FROM api_keys WHERE key_hash = ?`, hash).
 		Scan(&k.ID, &k.UserID, &k.Prefix, &k.KeyHash, &k.SecretEnc, &k.Name, &k.AllowedModels, &k.IPAllowlist,
-			&k.RPM, &k.TPM, &k.ExpiresAt, &k.RevokedAt, &k.CreatedAt)
+			&k.RPM, &k.TPM, &k.ExpiresAt, &k.RevokedAt, &k.CreatedAt, &k.LogContent)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -85,7 +86,7 @@ func (s *Store) GetAPIKeyByHash(hash string) (*APIKey, error) {
 // ListKeysByUser mengembalikan seluruh key milik user.
 func (s *Store) ListKeysByUser(userID int64) ([]*APIKey, error) {
 	rows, err := s.DB.Query(`SELECT id, user_id, prefix, key_hash, secret_enc, name, allowed_models, ip_allowlist,
-		rpm, tpm, expires_at, revoked_at, created_at FROM api_keys WHERE user_id = ? ORDER BY id`, userID)
+		rpm, tpm, expires_at, revoked_at, created_at, log_content FROM api_keys WHERE user_id = ? ORDER BY id`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +95,7 @@ func (s *Store) ListKeysByUser(userID int64) ([]*APIKey, error) {
 	for rows.Next() {
 		k := &APIKey{}
 		if err := rows.Scan(&k.ID, &k.UserID, &k.Prefix, &k.KeyHash, &k.SecretEnc, &k.Name, &k.AllowedModels, &k.IPAllowlist,
-			&k.RPM, &k.TPM, &k.ExpiresAt, &k.RevokedAt, &k.CreatedAt); err != nil {
+			&k.RPM, &k.TPM, &k.ExpiresAt, &k.RevokedAt, &k.CreatedAt, &k.LogContent); err != nil {
 			return nil, err
 		}
 		k.AllowedList = parseJSONList(k.AllowedModels)
@@ -210,4 +211,16 @@ func cidrContains(cidr, ip string) bool {
 	}
 	addr := net.ParseIP(ip)
 	return addr != nil && network.Contains(addr)
+}
+
+// SetKeyLogContent menyalakan/mematikan pencatatan isi request untuk key.
+func (s *Store) SetKeyLogContent(id int64, on bool) error {
+	res, err := s.DB.Exec(`UPDATE api_keys SET log_content = ? WHERE id = ?`, boolInt(on), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

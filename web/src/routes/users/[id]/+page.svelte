@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { UserRound, ArrowLeft, Activity, Coins, Gauge, AlertTriangle, Timer, KeyRound, RefreshCw, MessagesSquare, ShieldAlert } from '@lucide/svelte';
+	import { UserRound, ArrowLeft, Activity, Coins, Gauge, AlertTriangle, Timer, KeyRound, RefreshCw, MessagesSquare, ShieldAlert, FileSearch } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { api, fmtNum, fmtCost, fmtTs, md } from '#lib/api.js';
 	import { t, toast } from '#lib/stores.svelte.js';
 	import Stat from '#lib/components/Stat.svelte';
 	import Modal from '#lib/components/Modal.svelte';
+	import LogContentModal from '#lib/components/LogContentModal.svelte';
 
 	const RANGES = [1, 7, 30, 90];
 
@@ -56,6 +57,27 @@
 		const k = (res?.keys || []).find((x: any) => String(x.id) === String(id));
 		return k ? `${k.prefix}… ${k.name}` : id ? `#${id}` : '-';
 	};
+	// ---- pencatatan isi request API (opt-in, disimpan 7 hari) ----
+	let openLog = $state<string | null>(null);
+	let toggling = $state('');
+	async function setUserLogContent(on: boolean) {
+		toggling = 'user';
+		try {
+			await api.put(`/api/admin/users/${page.params.id}/log-content`, { enabled: on });
+			res.log_content = on;
+			toast(on ? 'Pencatatan isi request user dinyalakan' : 'Pencatatan isi request user dimatikan', 'ok');
+		} catch (e: any) { toast(e.message, 'err'); }
+		toggling = '';
+	}
+	async function setKeyLogContent(k: any, on: boolean) {
+		toggling = 'key' + k.id;
+		try {
+			await api.put(`/api/admin/keys/${k.id}/log-content`, { enabled: on });
+			k.log_content = on;
+		} catch (e: any) { toast(e.message, 'err'); }
+		toggling = '';
+	}
+
 	const pct = (used: number, limit: number) => (limit > 0 ? Math.min(100, (used / limit) * 100) : 0);
 	const statusClass = (s: string) => (+s >= 200 && +s < 400 ? 'ok' : +s >= 500 || +s === 0 ? 'err' : 'warn');
 </script>
@@ -193,10 +215,34 @@
 	</div>
 
 	<div class="card" style="margin-top:14px">
+		<h2><FileSearch size={16} /> Pencatatan isi request API</h2>
+		<p class="muted small" style="margin:0 0 10px">
+			Bila menyala, isi request &amp; jawaban lewat API key dicatat (rahasia yang dikenali disamarkan), bisa dilihat dari
+			tabel log, dan dikosongkan otomatis setelah 7 hari. User melihat pemberitahuan di halaman API-nya.
+		</p>
+		{#if res.log_content_global}
+			<div class="badge warn" style="margin-bottom:10px">Saklar global menyala — isi semua request API sedang dicatat.</div>
+		{/if}
+		<label class="switch-row">
+			<input type="checkbox" checked={res.log_content} disabled={toggling === 'user'}
+				onchange={(e) => setUserLogContent(e.currentTarget.checked)} />
+			<span><b>Semua API key milik user ini</b></span>
+		</label>
+		{#each (res.keys || []).filter((k: any) => !k.revoked_at) as k (k.id)}
+			<label class="switch-row">
+				<input type="checkbox" checked={k.log_content} disabled={toggling === 'key' + k.id || res.log_content}
+					onchange={(e) => setKeyLogContent(k, e.currentTarget.checked)} />
+				<span>Hanya key <span class="mono">{k.prefix}…</span> {k.name}</span>
+				{#if res.log_content}<span class="muted small">(tercakup saklar user)</span>{/if}
+			</label>
+		{/each}
+	</div>
+
+	<div class="card" style="margin-top:14px">
 		<h2>{t('recent_logs')} <span class="muted small">(50 terakhir)</span></h2>
 		<div class="table-wrap">
 			<table>
-				<thead><tr><th>{t('time')}</th><th>{t('api_key')}</th><th>{t('requested')}</th><th>{t('provider')}</th><th>{t('status')}</th><th>{t('latency')}</th><th>{t('tokens')}</th><th>{t('cost')}</th></tr></thead>
+				<thead><tr><th>{t('time')}</th><th>{t('api_key')}</th><th>{t('requested')}</th><th>{t('provider')}</th><th>{t('status')}</th><th>{t('latency')}</th><th>{t('tokens')}</th><th>{t('cost')}</th><th>Isi</th></tr></thead>
 				<tbody>
 					{#each res.recent_logs as l (l.id)}
 						<tr>
@@ -208,9 +254,14 @@
 							<td>{l.latency_ms} ms</td>
 							<td>{l.tokens_in}/{l.tokens_out}</td>
 							<td>{fmtCost(l.cost_usd)}</td>
+							<td>
+								{#if l.has_content}
+									<button class="btn ghost sm" onclick={() => (openLog = l.id)} title="Lihat isi request & jawaban"><FileSearch size={13} /></button>
+								{/if}
+							</td>
 						</tr>
 					{:else}
-						<tr><td colspan="8" class="muted">{t('no_data')}</td></tr>
+						<tr><td colspan="9" class="muted">{t('no_data')}</td></tr>
 					{/each}
 				</tbody>
 			</table>
@@ -283,7 +334,12 @@
 		</div>
 	</Modal>
 {/if}
+{#if openLog}<LogContentModal logId={openLog} onclose={() => (openLog = null)} />{/if}
+
 <style>
+	.switch-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--border); cursor: pointer; font-size: 13.5px; }
+	.switch-row:first-of-type { border-top: 0; }
+	.switch-row input { width: auto; margin: 0; }
 	.quota { padding: 8px 0; border-top: 1px solid var(--border); }
 	.quota:first-of-type { border-top: 0; }
 	.qrow { display: flex; align-items: center; gap: 10px; margin-top: 6px; }

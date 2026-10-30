@@ -289,7 +289,7 @@ Tanpa GPU, jadikan model lokal **langkah terakhir combo**.
 | `JR_MASTER_KEY` | dibuat otomatis (`data/master.key`, 0600) | Kunci AES-256-GCM secret provider (hex 64 atau passphrase) |
 | `JR_PUBLIC_URL` | — | `https://…` → cookie Secure otomatis |
 | `JR_LLAMASTASH_URL` | `http://127.0.0.1:11435/v1` | Proxy LlamaStash |
-| `JR_LOG_PROMPTS` | `false` | Simpan isi prompt untuk debug (jangan di produksi) |
+| `JR_LOG_PROMPTS` | `false` | Paksa pencatatan isi semua request API menyala (sama dengan saklar global di Pengaturan). Isi disimpan 7 hari lalu dikosongkan otomatis; bisa juga dinyalakan per user/API key dari detail user |
 | `JR_TZ` | `Asia/Jakarta` | Zona reset kuota harian/bulanan |
 | `JR_BACKUP_ENABLED` / `JR_BACKUP_HOUR` | `true` / `3` | Backup harian otomatis (retensi 7) |
 | `JR_SESSION_TTL` | `24h` | Masa berlaku sesi dashboard |

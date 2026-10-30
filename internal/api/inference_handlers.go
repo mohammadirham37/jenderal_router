@@ -90,6 +90,11 @@ func (a *App) infer(w http.ResponseWriter, r *http.Request, inbound translate.Fo
 		IP: apigate.ClientIP(r), TokensIn: reqTokens,
 		QuotaTargets: []usage.QuotaTarget{{Scope: "user", ScopeID: ac.User.ID}, {Scope: "key", ScopeID: ac.Key.ID}},
 	}
+	// isi request dicatat hanya bila saklar global/user/key menyala
+	var clog *contentLog
+	if a.contentLogging(ac.User.ID, ac.Key) {
+		clog = newContentLog(internal)
+	}
 
 	// SSE header + keep-alive selama menunggu token pertama (FR-6.4)
 	// (goroutine ping memakai mutex + flush; Stop menunggu goroutine selesai
@@ -119,6 +124,8 @@ func (a *App) infer(w http.ResponseWriter, r *http.Request, inbound translate.Fo
 		rec.Status = statusForError(runErr)
 		rec.ErrorCode = codeForError(runErr)
 		rec.LatencyMs = time.Since(start).Milliseconds()
+		clog.setError(runErr.Error())
+		rec.ContentDebug = clog.render()
 		a.rec.Record(rec)
 		metrics.observeRequest("", rec.Status, time.Since(start).Seconds(), rec.TokensIn, rec.TokensOut)
 		for _, at := range attempts {
@@ -144,7 +151,7 @@ func (a *App) infer(w http.ResponseWriter, r *http.Request, inbound translate.Fo
 
 	if internal.Stream {
 		// FR-2.3: fallback sudah selesai di runner; mulai sekarang error diteruskan
-		a.streamToClient(w, inbound, res, &rec, start, ttftMs, reqTokens)
+		a.streamToClient(w, inbound, res, &rec, start, ttftMs, reqTokens, clog)
 		_ = a.gate.RecordTPM(ac.Key.ID, ac.Key.TPM, rec.TokensIn+rec.TokensOut)
 		return
 	}
@@ -161,6 +168,8 @@ func (a *App) infer(w http.ResponseWriter, r *http.Request, inbound translate.Fo
 	rec.LatencyMs = time.Since(start).Milliseconds()
 	rec.TTFTMs = rec.LatencyMs
 	a.applyCost(&rec, res.ModelPublic)
+	clog.setResponse(resp.Content, resp.ToolCalls)
+	rec.ContentDebug = clog.render()
 	a.rec.Record(rec)
 	metrics.observeRequest(res.ProviderName, http.StatusOK, time.Since(start).Seconds(), tokensIn, tokensOut)
 	_ = a.gate.RecordTPM(ac.Key.ID, ac.Key.TPM, tokensIn+tokensOut)
@@ -181,7 +190,7 @@ func (a *App) infer(w http.ResponseWriter, r *http.Request, inbound translate.Fo
 }
 
 // streamToClient meneruskan event upstream ke klien dalam format endpoint.
-func (a *App) streamToClient(w http.ResponseWriter, inbound translate.Format, res *router.AttemptResult, rec *usage.Entry, start time.Time, ttftMs int64, reqTokens int) {
+func (a *App) streamToClient(w http.ResponseWriter, inbound translate.Format, res *router.AttemptResult, rec *usage.Entry, start time.Time, ttftMs int64, reqTokens int, clog *contentLog) {
 	flusher, _ := w.(http.Flusher)
 	w.WriteHeader(http.StatusOK)
 	if flusher != nil {
@@ -194,20 +203,22 @@ func (a *App) streamToClient(w http.ResponseWriter, inbound translate.Format, re
 			rec.TTFTMs = ttftMs
 		}
 		a.applyCost(rec, res.ModelPublic)
+		rec.ContentDebug = clog.render()
 		a.rec.Record(*rec)
 		metrics.observeRequest(res.ProviderName, http.StatusOK, time.Since(start).Seconds(), rec.TokensIn, rec.TokensOut)
 	}()
 	if inbound == translate.FormatAnthropic {
-		a.streamAnthropicOut(w, flusher, res, rec, reqTokens)
+		a.streamAnthropicOut(w, flusher, res, rec, reqTokens, clog)
 		return
 	}
-	a.streamOpenAIOut(w, flusher, res, rec, reqTokens)
+	a.streamOpenAIOut(w, flusher, res, rec, reqTokens, clog)
 }
 
-func (a *App) streamOpenAIOut(w http.ResponseWriter, flusher http.Flusher, res *router.AttemptResult, rec *usage.Entry, reqTokens int) {
+func (a *App) streamOpenAIOut(w http.ResponseWriter, flusher http.Flusher, res *router.AttemptResult, rec *usage.Entry, reqTokens int, clog *contentLog) {
 	id := genChunkID()
 	model := res.ModelDisplay // echo nama tampilan (alias)
 	var content strings.Builder
+	var calls toolCallAccumulator
 	first := true
 	tokensIn, tokensOut := 0, 0
 
@@ -238,6 +249,9 @@ func (a *App) streamOpenAIOut(w http.ResponseWriter, flusher http.Flusher, res *
 			if e.Delta.Text != "" {
 				content.WriteString(e.Delta.Text)
 			}
+			if clog != nil {
+				calls.add(e.Delta.ToolCalls)
+			}
 			emit(translate.RenderOpenAISSEChunk(e, id, model))
 		case translate.EventUsage:
 			if e.Usage != nil {
@@ -254,6 +268,7 @@ func (a *App) streamOpenAIOut(w http.ResponseWriter, flusher http.Flusher, res *
 			}, id, model))
 		case translate.EventError:
 			// FR-2.3: error setelah token pertama diteruskan, bukan fallback
+			clog.setError(e.Error.Message)
 			emit(string(translate.RenderOpenAIError(http.StatusBadGateway, "upstream_error", e.Error.Message)))
 		}
 	}
@@ -270,6 +285,7 @@ func (a *App) streamOpenAIOut(w http.ResponseWriter, flusher http.Flusher, res *
 		rec.TokensEstimated = true
 	}
 	rec.TokensIn, rec.TokensOut = tokensIn, tokensOut
+	clog.setResponse(content.String(), calls.list())
 	// chunk usage gaya stream_options.include_usage (choices kosong)
 	emit(translate.RenderOpenAISSEChunk(translate.Event{
 		Type:  translate.EventUsage,
@@ -279,9 +295,10 @@ func (a *App) streamOpenAIOut(w http.ResponseWriter, flusher http.Flusher, res *
 	res.Stream.Close()
 }
 
-func (a *App) streamAnthropicOut(w http.ResponseWriter, flusher http.Flusher, res *router.AttemptResult, rec *usage.Entry, reqTokens int) {
+func (a *App) streamAnthropicOut(w http.ResponseWriter, flusher http.Flusher, res *router.AttemptResult, rec *usage.Entry, reqTokens int, clog *contentLog) {
 	writer := translate.NewAnthropicSSEWriter()
 	var content strings.Builder
+	var calls toolCallAccumulator
 	first := true
 	tokensIn, tokensOut := 0, 0
 
@@ -316,6 +333,9 @@ func (a *App) streamAnthropicOut(w http.ResponseWriter, flusher http.Flusher, re
 			if e.Delta.Text != "" {
 				content.WriteString(e.Delta.Text)
 			}
+			if clog != nil {
+				calls.add(e.Delta.ToolCalls)
+			}
 			writeFrames(writer.WriteEvent(e))
 		case translate.EventUsage:
 			if e.Usage != nil {
@@ -327,6 +347,7 @@ func (a *App) streamAnthropicOut(w http.ResponseWriter, flusher http.Flusher, re
 			writeFrames(writer.WriteEvent(e))
 		case translate.EventError:
 			// FR-2.3: error di tengah stream diteruskan sebagai event error
+			clog.setError(e.Error.Message)
 			fmt.Fprint(w, frameAnthropicError(e.Error))
 			if flusher != nil {
 				flusher.Flush()
@@ -346,6 +367,7 @@ func (a *App) streamAnthropicOut(w http.ResponseWriter, flusher http.Flusher, re
 		rec.TokensEstimated = true
 	}
 	rec.TokensIn, rec.TokensOut = tokensIn, tokensOut
+	clog.setResponse(content.String(), calls.list())
 	res.Stream.Close()
 }
 

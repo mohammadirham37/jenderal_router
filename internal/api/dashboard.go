@@ -62,9 +62,12 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("GET /api/admin/keys/{id}/reveal", a.requireSession(a.handleRevealKey, store.RoleAdmin, false))
 	a.mux.HandleFunc("PUT /api/admin/users/{id}/quota", a.requireSession(a.handlePutUserQuota, store.RoleAdmin, true))
 	a.mux.HandleFunc("PUT /api/admin/keys/{id}/quota", a.requireSession(a.handlePutKeyQuota, store.RoleAdmin, true))
+	a.mux.HandleFunc("PUT /api/admin/users/{id}/log-content", a.requireSession(a.handleSetUserLogContent, store.RoleAdmin, true))
+	a.mux.HandleFunc("PUT /api/admin/keys/{id}/log-content", a.requireSession(a.handleSetKeyLogContent, store.RoleAdmin, true))
 
 	a.mux.HandleFunc("GET /api/admin/logs", a.requireSession(a.handleListLogs, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/logs/export.csv", a.requireSession(a.handleExportLogs, store.RoleAdmin, false))
+	a.mux.HandleFunc("GET /api/admin/logs/{id}/content", a.requireSession(a.handleLogContent, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/analytics/summary", a.requireSession(a.handleAnalyticsSummary, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/analytics/top-users", a.requireSession(a.handleTopUsers, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/audit", a.requireSession(a.handleListAudit, store.RoleAdmin, false))

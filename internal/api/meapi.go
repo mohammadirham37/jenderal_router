@@ -23,7 +23,14 @@ func (a *App) handleMeKeys(w http.ResponseWriter, r *http.Request) {
 	if keys == nil {
 		keys = []*store.APIKey{}
 	}
-	writeJSON(w, 200, map[string]any{"keys": keys})
+	// transparansi: beri tahu user bila isi request API-nya sedang dicatat
+	userOn, _ := a.st.UserLogContent(ai.user.ID)
+	global := a.contentLogGlobal()
+	logged := map[int64]bool{}
+	for _, k := range keys {
+		logged[k.ID] = global || userOn || k.LogContent
+	}
+	writeJSON(w, 200, map[string]any{"keys": keys, "content_logged": logged, "content_retention_days": int(contentRetention.Hours() / 24)})
 }
 
 // handleMeCreateKey member membuat API key untuk DIRINYA SENDIRI.

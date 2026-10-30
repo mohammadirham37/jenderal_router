@@ -1,7 +1,10 @@
 <script lang="ts">
-	import { ScrollText, RefreshCw, Download } from '@lucide/svelte';
+	import { ScrollText, RefreshCw, Download, FileSearch } from '@lucide/svelte';
 	import { api, fmtCost, fmtTs } from '#lib/api.js';
 	import { t } from '#lib/stores.svelte.js';
+	import LogContentModal from '#lib/components/LogContentModal.svelte';
+
+	let openLog = $state<string | null>(null);
 
 	let logs = $state<any[]>([]);
 	let loading = $state(true);
@@ -46,7 +49,10 @@
 		</select>
 		<button class="btn" onclick={load}>Terapkan</button>
 	</div>
-	<div class="muted small" style="margin-top:6px">Isi prompt tidak pernah disimpan — hanya metadata (privasi, NFR-14).</div>
+	<div class="muted small" style="margin-top:6px">
+		Isi request hanya dicatat bila pencatatan isi dinyalakan (global di Pengaturan, atau per user/API key di detail user),
+		disimpan 7 hari, dan setiap pembukaannya tercatat di audit log. Selain itu hanya metadata (privasi, NFR-14).
+	</div>
 </div>
 
 <div class="card table-wrap">
@@ -55,7 +61,7 @@
 	{:else}
 		<table>
 			<thead>
-				<tr><th>{t('time')}</th><th>{t('requested')}</th><th>{t('provider')}</th><th>{t('model')}</th><th>{t('status')}</th><th>{t('latency')}</th><th>TTFT</th><th>{t('tokens')}</th><th>{t('cost')}</th><th>{t('attempts')}</th></tr>
+				<tr><th>{t('time')}</th><th>{t('requested')}</th><th>{t('provider')}</th><th>{t('model')}</th><th>{t('status')}</th><th>{t('latency')}</th><th>TTFT</th><th>{t('tokens')}</th><th>{t('cost')}</th><th>{t('attempts')}</th><th>Isi</th></tr>
 			</thead>
 			<tbody>
 				{#each logs as l (l.id)}
@@ -70,11 +76,18 @@
 						<td>{l.tokens_in}/{l.tokens_out}</td>
 						<td>{fmtCost(l.cost_usd)}</td>
 						<td>{l.attempts}</td>
+						<td>
+							{#if l.has_content}
+								<button class="btn ghost sm" onclick={() => (openLog = l.id)} title="Lihat isi request & jawaban"><FileSearch size={13} /></button>
+							{/if}
+						</td>
 					</tr>
 				{:else}
-					<tr><td colspan="10" class="muted">{t('no_data')}</td></tr>
+					<tr><td colspan="11" class="muted">{t('no_data')}</td></tr>
 				{/each}
 			</tbody>
 		</table>
 	{/if}
 </div>
+
+{#if openLog}<LogContentModal logId={openLog} onclose={() => (openLog = null)} />{/if}

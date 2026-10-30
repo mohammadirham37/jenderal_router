@@ -328,3 +328,25 @@ func (s *Store) DeleteUserSessions(userID int64, exceptToken string) error {
 		userID, crypto.HashToken(exceptToken))
 	return err
 }
+
+// UserLogContent apakah isi request API user ini dicatat (saklar per user).
+func (s *Store) UserLogContent(userID int64) (bool, error) {
+	var on bool
+	err := s.DB.QueryRow(`SELECT log_content FROM users WHERE id = ?`, userID).Scan(&on)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	return on, err
+}
+
+// SetUserLogContent menyalakan/mematikan pencatatan isi request API user.
+func (s *Store) SetUserLogContent(userID int64, on bool) error {
+	res, err := s.DB.Exec(`UPDATE users SET log_content = ? WHERE id = ?`, boolInt(on), userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

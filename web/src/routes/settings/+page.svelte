@@ -1,9 +1,21 @@
 <script lang="ts">
-	import { Settings, Save, Database, Rocket, RefreshCw, ScrollText, Copy, Globe } from '@lucide/svelte';
+	import { Settings, Save, Database, Rocket, RefreshCw, ScrollText, Copy, Globe, FileSearch } from '@lucide/svelte';
 	import { api } from '#lib/api.js';
 	import { copyText } from '#lib/clipboard.js';
 	import { fmtTs } from '#lib/api.js';
-	import { t, toast } from '#lib/stores.svelte.js';
+	import { t, toast, app, roleAtLeast } from '#lib/stores.svelte.js';
+
+	// ---- pencatatan isi request API (global) ----
+	let logContent = $state(false);
+	let logPromptsEnv = $state(false);
+	const superAdmin = $derived(roleAtLeast(app.me?.role || '', 'super_admin'));
+	async function setLogContent(on: boolean) {
+		try {
+			await api.put('/api/admin/settings', { log_content: on ? 'true' : 'false' });
+			logContent = on;
+			toast(on ? 'Isi semua request API kini dicatat (7 hari)' : 'Pencatatan isi global dimatikan', 'ok');
+		} catch (e: any) { toast(e.message, 'err'); }
+	}
 
 	// ---- notifikasi ----
 	let tgToken = $state(''); let tgChat = $state(''); let tgTokenSet = $state(false);
@@ -94,7 +106,7 @@ sudo cloudflared service install`;
 
 	$effect(() => {
 		(async () => {
-			try { const s = await api.get('/api/admin/settings'); tgTokenSet = s.settings.notification_telegram_token_set === 'true'; tgChat = s.settings.notification_chat_id || ''; } catch { /* */ }
+			try { const s = await api.get('/api/admin/settings'); tgTokenSet = s.settings.notification_telegram_token_set === 'true'; tgChat = s.settings.notification_chat_id || ''; logContent = s.settings.log_content === 'true'; logPromptsEnv = s.settings.log_prompts === 'true'; } catch { /* */ }
 		})();
 	});
 
@@ -120,6 +132,25 @@ sudo cloudflared service install`;
 	<div class="modal-actions" style="justify-content:flex-start;margin-top:12px">
 		<button class="btn" onclick={saveSettings}><Save size={15} /> {t('save')}</button>
 	</div>
+</div>
+
+<div class="card">
+	<h2><FileSearch size={15} /> Pencatatan isi request API</h2>
+	<p class="muted small" style="margin:0 0 10px">
+		Saklar global: isi request &amp; jawaban <b>semua</b> API key dicatat. Untuk user/key tertentu saja, gunakan saklar di
+		halaman detail user. Isi disimpan 7 hari lalu dikosongkan otomatis; rahasia yang dikenali disamarkan; setiap pembukaan
+		tercatat di audit log.
+	</p>
+	{#if logPromptsEnv}
+		<div class="badge warn">Dipaksa menyala oleh env JR_LOG_PROMPTS di server.</div>
+	{:else}
+		<label class="kv" style="cursor:pointer">
+			<input type="checkbox" style="width:auto;margin:0" checked={logContent} disabled={!superAdmin}
+				onchange={(e) => setLogContent(e.currentTarget.checked)} />
+			<span>Catat isi semua request API</span>
+			{#if !superAdmin}<span class="muted small">(hanya super admin yang bisa mengubah)</span>{/if}
+		</label>
+	{/if}
 </div>
 
 <div class="card">

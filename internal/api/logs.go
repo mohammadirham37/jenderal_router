@@ -8,7 +8,8 @@ import (
 )
 
 // queryLogs mengambil log request dengan filter (FR-5.1) sebagai peta baris.
-// Isi prompt tidak pernah disertakan (NFR-14).
+// Isi prompt tidak disertakan — hanya penanda has_content; isinya diambil
+// lewat endpoint terpisah yang tercatat di audit (NFR-14).
 func (a *App) queryLogs(from, to, user, providerName, status string, limit int) ([]map[string]string, error) {
 	where := []string{"ts >= ?", "ts < ?"}
 	args := []any{from, to}
@@ -34,7 +35,8 @@ func (a *App) queryLogs(from, to, user, providerName, status string, limit int) 
 	query := `SELECT id, ts, COALESCE(CAST(user_id AS TEXT),''), COALESCE(CAST(key_id AS TEXT),''),
 		requested_model, provider_name, model_name, CAST(status AS TEXT), error_code,
 		CAST(latency_ms AS TEXT), CAST(ttft_ms AS TEXT), CAST(tokens_in AS TEXT), CAST(tokens_out AS TEXT),
-		CAST(cost_usd AS TEXT), CAST(attempts AS TEXT)
+		CAST(cost_usd AS TEXT), CAST(attempts AS TEXT),
+		CASE WHEN content_debug != '' THEN 'true' ELSE '' END
 		FROM request_logs WHERE ` + strings.Join(where, " AND ") + ` ORDER BY id DESC LIMIT ?`
 	args = append(args, limit)
 	rows, err := a.st.DB.Query(query, args...)
@@ -43,7 +45,7 @@ func (a *App) queryLogs(from, to, user, providerName, status string, limit int) 
 	}
 	defer rows.Close()
 	cols := []string{"id", "ts", "user_id", "key_id", "requested_model", "provider_name", "model_name",
-		"status", "error_code", "latency_ms", "ttft_ms", "tokens_in", "tokens_out", "cost_usd", "attempts"}
+		"status", "error_code", "latency_ms", "ttft_ms", "tokens_in", "tokens_out", "cost_usd", "attempts", "has_content"}
 	out := []map[string]string{}
 	for rows.Next() {
 		vals := make([]any, len(cols))

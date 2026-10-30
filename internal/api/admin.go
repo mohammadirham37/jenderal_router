@@ -893,9 +893,11 @@ func (a *App) handleUserUsageDetail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+	logContent, _ := a.st.UserLogContent(id)
 	writeJSON(w, 200, map[string]any{
 		"user": u.Public(), "days": days, "usage": detail,
 		"quotas": quotas, "keys": keys, "recent_logs": logs,
+		"log_content": logContent, "log_content_global": a.contentLogGlobal(),
 	})
 }
 
@@ -1169,6 +1171,7 @@ func (a *App) handleListAudit(w http.ResponseWriter, r *http.Request) {
 var settingKeys = map[string]bool{
 	"notification_telegram_token": true, "notification_chat_id": true, "public_url": true,
 	"google_oauth_client_id": true, "google_oauth_client_secret": true,
+	settingLogContent: true, // "true" = catat isi semua request API (7 hari)
 }
 
 func isSecretSetting(k string) bool {

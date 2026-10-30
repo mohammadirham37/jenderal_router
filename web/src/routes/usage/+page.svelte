@@ -16,6 +16,9 @@
 	};
 
 	let keys = $state<Key[]>([]);
+	// transparansi: key yang isi request-nya sedang dicatat admin
+	let contentLogged = $state<Record<string, boolean>>({});
+	let retentionDays = $state(7);
 	let logs = $state<any[]>([]);
 	let usage = $state<any>(null);
 	let loading = $state(true);
@@ -35,6 +38,8 @@
 					api.get('/api/me/logs?limit=20')
 				]);
 				keys = k.keys || [];
+				contentLogged = k.content_logged || {};
+				retentionDays = k.content_retention_days || 7;
 				usage = u;
 				logs = l.logs || [];
 			} catch (e: any) {
@@ -144,6 +149,9 @@
 				{#if k.revoked_at}<span class="badge err">revoked</span>
 				{:else}<span class="badge ok"><span class="dot"></span>active</span>{/if}
 				<span class="muted small">rpm={k.rpm} tpm={k.tpm}</span>
+				{#if contentLogged[k.id] && !k.revoked_at}
+					<span class="badge warn" title="Admin menyalakan pencatatan isi request untuk akun/key ini. Isi disimpan {retentionDays} hari lalu dihapus otomatis.">isi request dicatat ({retentionDays} hari)</span>
+				{/if}
 				<span class="grow"></span>
 				{#if !k.revoked_at && k.has_secret}
 					<button class="btn ghost sm" onclick={() => copyKey(k)}>

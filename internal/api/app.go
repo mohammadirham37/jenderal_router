@@ -129,6 +129,12 @@ func (a *App) RunBackground(ctx context.Context) {
 			if n, err := a.st.PurgeExpiredSessions(); err == nil && n > 0 {
 				slog.Info("sesi kedaluwarsa dibuang", "count", n)
 			}
+			// isi request API (log konten) hanya disimpan 7 hari
+			if n, err := a.purgeLogContent(time.Now()); err != nil {
+				slog.Error("pengosongan isi log gagal", "err", err)
+			} else if n > 0 {
+				slog.Info("isi log request lama dikosongkan", "count", n)
+			}
 			if d := a.cfg.LogRetentionDays; d > 0 {
 				if n, err := usage.PurgeLogs(a.st, time.Now().AddDate(0, 0, -d)); err != nil {
 					slog.Error("retensi log gagal", "err", err)
