@@ -64,7 +64,7 @@ export const api = {
 		opts: { model: string; messages: any[]; conversationId?: number | null; temperature?: number; maxTokens?: number; tools?: any[]; signal?: AbortSignal },
 		onDelta: (text: string) => void,
 		onMeta?: (usage: any) => void,
-		onExtra?: (e: { reasoning?: string; model?: string }) => void,
+		onExtra?: (e: { reasoning?: string; model?: string; trimmed?: { n: number; window: number } }) => void,
 		onChunk?: (j: any) => void
 	) {
 		const res = await fetch('/api/me/chat', {
@@ -102,6 +102,7 @@ export const api = {
 						if (delta?.content) onDelta(delta.content);
 						if (j.reasoning_content && onExtra) onExtra({ reasoning: j.reasoning_content });
 						if (j.served_model && onExtra) onExtra({ model: j.served_model });
+						if (j.context_trimmed && onExtra) onExtra({ trimmed: { n: j.context_trimmed, window: j.context_window } });
 						if (j.usage && onMeta) onMeta(j.usage);
 					} catch (e: any) {
 						if (e.message && !/JSON/.test(e.message)) throw e;

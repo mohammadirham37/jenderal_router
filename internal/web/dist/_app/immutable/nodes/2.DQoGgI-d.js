@@ -1,0 +1,1 @@
+import{U as e,it as t,rt as n}from"../chunks/DMYv2urb.js";import{t as r}from"../chunks/DdWR2bJ9.js";function i(i,a){t(a,!0),e(()=>{r(`/dashboard`,{replace:!0})}),n()}export{i as component};

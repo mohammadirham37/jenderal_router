@@ -1,7 +1,7 @@
 <script lang="ts">
 	import {
 		Plus, ArrowUp, Square, Trash2, Sparkles, History, Globe, Activity, Gauge, Download, FileText,
-		Presentation, Sheet, Table, Copy, Check, ArrowDown, ChevronRight, Brain, Bot, Search, Paperclip, X, Image as ImageIcon, Upload
+		Presentation, Sheet, Table, Copy, Check, ArrowDown, ChevronRight, Brain, Bot, Search, Paperclip, X, Image as ImageIcon, Upload, Pencil, RotateCcw, Info
 	} from '@lucide/svelte';
 	import { api, md, fmtTs, fmtNum } from '#lib/api.js';
 	import { copyText } from '#lib/clipboard.js';
@@ -14,6 +14,7 @@
 	} from '#lib/attachments.js';
 
 	type Msg = {
+		id?: number; // id baris DB (untuk edit/regenerate)
 		role: 'user' | 'assistant' | 'tool'; content: string; provider?: string;
 		reasoning?: string; model?: string; ms?: number;
 		thinkStart?: number; thinkMs?: number; thinkOpen?: boolean; stopped?: boolean;
@@ -21,6 +22,7 @@
 		file?: { name: string; url: string; size: number; type: DocType };
 		building?: DocType; // dokumen sedang dirakit
 		attachments?: Attachment[]; // lampiran pesan user
+		trimmed?: { n: number; window: number }; // pesan lama yang dipangkas server
 	};
 	type ToolCall = { id: string; name: string; args: string };
 	// satu pemanggilan tool dalam giliran assistant; result ikut disimpan agar
@@ -142,9 +144,10 @@
 			msgs = (res.messages || []).map((m: any) => {
 				const meta = m.meta || {};
 				return {
-					role: m.role, content: m.content, provider: m.provider_name, model: m.model || undefined,
+					id: m.id, role: m.role, content: m.content, provider: m.provider_name, model: m.model || undefined,
 					reasoning: meta.reasoning, thinkMs: meta.think_ms, tools: meta.tools, stopped: meta.stopped,
-					attachments: meta.attachments
+					attachments: meta.attachments,
+					trimmed: meta.context_trimmed ? { n: meta.context_trimmed, window: meta.context_window } : undefined
 				};
 			});
 			showHistory = false;
@@ -397,9 +400,43 @@
 			return;
 		}
 		const atts = storedAttachments(pending);
-		sending = true;
 		input = '';
 		pending = [];
+		await runTurn(text, atts);
+	}
+
+	// ================= edit & regenerate =================
+	let editIdx = $state(-1);
+	let editText = $state('');
+	function startEdit(i: number) {
+		editIdx = i;
+		editText = msgs[i].content;
+	}
+	// resendFrom memotong riwayat mulai pesan user ke-i (lokal + DB) lalu
+	// mengirim ulang dengan teks baru; lampiran pesan asli ikut terbawa
+	async function resendFrom(i: number, text: string) {
+		const u = msgs[i];
+		if (sending || !u || u.role !== 'user') return;
+		const atts = u.attachments ?? [];
+		if (!text && !atts.length) return;
+		if (i < msgs.length - 2 && !confirm('Pesan dan jawaban setelahnya akan dihapus. Lanjutkan?')) return;
+		if (current) {
+			if (!u.id) { toast('riwayat belum tersinkron — buka ulang percakapan lalu coba lagi', 'err'); return; }
+			try { await api.del(`/api/me/conversations/${current}/messages?from=${u.id}`); }
+			catch (e: any) { toast('gagal menghapus riwayat: ' + e.message, 'err'); return; }
+		}
+		msgs = msgs.slice(0, i);
+		editIdx = -1;
+		await runTurn(text, atts);
+	}
+	function regenerate(i: number) {
+		for (let k = i - 1; k >= 0; k--) {
+			if (msgs[k].role === 'user') { resendFrom(k, msgs[k].content); return; }
+		}
+	}
+
+	async function runTurn(text: string, atts: Attachment[]) {
+		sending = true;
 		// mode paksa / deteksi kata kunci → instruksi dokumen sejak awal; selain itu
 		// model sendiri yang memutuskan lewat tool create_document
 		const forcedDoc: DocType | null = fileMode === 'auto' ? detectDocRequest(text) : fileMode === 'none' ? null : fileMode;
@@ -417,6 +454,7 @@
 			}
 		}
 		msgs.push({ role: 'user', content: text, attachments: atts.length ? atts : undefined });
+		const userMsg = msgs[msgs.length - 1];
 		scrollToBottom(true, true);
 
 		const history: any[] = [];
@@ -451,6 +489,7 @@
 					(extra) => {
 						if (extra.reasoning) queue('reasoning', extra.reasoning);
 						if (extra.model) bubble.model = extra.model.split('/').pop()?.replace(/\.gguf$/i, '') || extra.model;
+						if (extra.trimmed) bubble.trimmed = extra.trimmed;
 					},
 					(chunk) => {
 						const d = chunk.choices?.[0]?.delta;
@@ -498,7 +537,7 @@
 				}
 				scrollToBottom();
 			}
-			await saveTurn(text, atts, bubble);
+			await saveTurn(text, atts, userMsg, bubble);
 			if (docType) await attachGeneratedFile(docType, docStart >= 0 ? bubble.content.slice(docStart) : undefined, docTitle);
 			loadQuota();
 			loadConversations();
@@ -508,7 +547,7 @@
 			else bubble.content += '\n\n**⚠ ' + e.message + '**';
 			for (const u of bubble.tools ?? []) if (u.status === 'run') { u.status = 'err'; u.result = 'ERROR: dibatalkan'; }
 			// simpan best-effort: user + jawaban parsial agar tidak hilang saat refresh
-			if (current) try { await saveTurn(text, atts, bubble); } catch { /* */ }
+			if (current && !bubble.id) try { await saveTurn(text, atts, userMsg, bubble); } catch { /* */ }
 		} finally {
 			target = null;
 			abort = null;
@@ -605,15 +644,20 @@
 		if (m.thinkMs) meta.think_ms = Math.round(m.thinkMs);
 		if (m.tools?.length) meta.tools = m.tools.map(({ id, name, args, url, query, hits, doc, round, status, result }) => ({ id, name, args, url, query, hits, doc, round, status, result }));
 		if (m.stopped) meta.stopped = true;
+		if (m.trimmed) { meta.context_trimmed = m.trimmed.n; meta.context_window = m.trimmed.window; }
 		return Object.keys(meta).length ? meta : undefined;
 	}
-	async function saveTurn(text: string, atts: Attachment[], bubble: Msg) {
-		await api.post(`/api/me/conversations/${current}/messages`, {
-			role: 'user', content: text, meta: atts.length ? { attachments: atts } : undefined
-		});
-		await api.post(`/api/me/conversations/${current}/messages`, {
+	async function saveTurn(text: string, atts: Attachment[], userMsg: Msg, bubble: Msg) {
+		if (!userMsg.id) {
+			const r = await api.post(`/api/me/conversations/${current}/messages`, {
+				role: 'user', content: text, meta: atts.length ? { attachments: atts } : undefined
+			});
+			userMsg.id = r.id;
+		}
+		const r = await api.post(`/api/me/conversations/${current}/messages`, {
 			role: 'assistant', content: bubble.content.trim(), model: bubble.model || model, meta: msgMeta(bubble)
 		});
+		bubble.id = r.id;
 	}
 
 	const lastIdx = $derived(msgs.length - 1);
@@ -707,7 +751,31 @@
 										{/each}
 									</div>
 								{/if}
-								{#if m.content}<div class="bubble">{m.content}</div>{/if}
+								{#if editIdx === i}
+									<div class="edit-box">
+										<!-- svelte-ignore a11y_autofocus -->
+										<textarea bind:value={editText} rows="3" autofocus aria-label="Edit pesan"
+											onkeydown={(e) => {
+												if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); resendFrom(i, editText.trim()); }
+												if (e.key === 'Escape') editIdx = -1;
+											}}></textarea>
+										<div class="edit-bar">
+											<span class="muted">Jawaban setelah pesan ini akan dibuat ulang.</span>
+											<button class="btn ghost sm" onclick={() => (editIdx = -1)}>Batal</button>
+											<button class="btn sm" onclick={() => resendFrom(i, editText.trim())} disabled={!editText.trim() && !m.attachments?.length}>Kirim</button>
+										</div>
+									</div>
+								{:else}
+									{#if m.content}<div class="bubble">{m.content}</div>{/if}
+									{#if !sending}
+										<div class="user-actions">
+											<button class="act" title="Salin pesan" onclick={() => copyMsg(m, i)}>
+												{#if copiedIdx === i}<Check size={13} />{:else}<Copy size={13} />{/if}
+											</button>
+											<button class="act" title="Edit pesan & kirim ulang" onclick={() => startEdit(i)}><Pencil size={13} /></button>
+										</div>
+									{/if}
+								{/if}
 							</div>
 						</div>
 					{:else if m.role === 'assistant'}
@@ -780,11 +848,19 @@
 									</a>
 								{/if}
 
+								{#if m.trimmed && !live}
+									<div class="trim-note" title="Riwayat percakapan melebihi context window model, jadi pesan paling awal tidak dikirim. Mulai chat baru untuk topik lain.">
+										<Info size={12} /> {m.trimmed.n} pesan awal tidak dikirim ke model karena batas konteks ({m.trimmed.window.toLocaleString('id-ID')} token)
+									</div>
+								{/if}
 								{#if m.content && !live}
 									<div class="actions">
 										<button class="act" title="Salin jawaban" onclick={() => copyMsg(m, i)}>
 											{#if copiedIdx === i}<Check size={14} />{:else}<Copy size={14} />{/if}
 										</button>
+										{#if i === lastIdx && !sending}
+											<button class="act" title="Buat ulang jawaban" onclick={() => regenerate(i)}><RotateCcw size={14} /></button>
+										{/if}
 										<span class="exports">
 											{#each EXPORTS as ex (ex.fmt)}
 												<button title={ex.hint} onclick={() => doExport(m, ex.fmt)}>{ex.label}</button>
@@ -1147,6 +1223,14 @@
 	/* lebar dibatasi di kolom (bukan bubble) agar bubble pendek tidak terlipat */
 	.user-col { display: flex; flex-direction: column; align-items: flex-end; max-width: min(80%, 760px); min-width: 0; }
 	.user-col .bubble { max-width: 100%; }
+	.user-actions { display: flex; gap: 2px; margin-top: 4px; opacity: 0; transition: opacity var(--speed); }
+	.turn.user:hover .user-actions, .user-actions:focus-within { opacity: 1; }
+	@media (hover: none) { .user-actions { opacity: 1; } }
+	.edit-box { width: min(760px, 100%); border: 1px solid var(--border-strong); border-radius: 16px; background: var(--surface); padding: 10px 12px; }
+	.edit-box textarea { all: unset; display: block; width: 100%; min-height: 60px; white-space: pre-wrap; font-size: 14.5px; line-height: 1.55; }
+	.edit-bar { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+	.edit-bar .muted { flex: 1; font-size: 11.5px; }
+	.trim-note { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); margin: 8px 0 0; }
 	.drop-overlay {
 		position: absolute; inset: 8px; z-index: 30; border-radius: 14px; pointer-events: none;
 		display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;

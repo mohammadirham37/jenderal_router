@@ -242,6 +242,16 @@ func (s *Store) RepairConversationTitles() {
 	  AND EXISTS (SELECT 1 FROM messages WHERE conversation_id = conversations.id AND role = 'user')`)
 }
 
+// DeleteMessagesFrom menghapus pesan dengan id >= fromID dalam percakapan
+// (edit pesan / regenerate jawaban memotong riwayat dari titik itu).
+func (s *Store) DeleteMessagesFrom(conversationID, fromID int64) (int64, error) {
+	res, err := s.DB.Exec(`DELETE FROM messages WHERE conversation_id = ? AND id >= ?`, conversationID, fromID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // ListMessages pesan percakapan urut waktu.
 func (s *Store) ListMessages(conversationID int64) ([]*Message, error) {
 	rows, err := s.DB.Query(`SELECT id, conversation_id, role, content, model, provider_name, meta, created_at

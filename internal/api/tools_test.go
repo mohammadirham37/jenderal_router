@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -62,5 +63,44 @@ func TestMeModelsVisionAndChatBodyLimit(t *testing.T) {
 	}, cookie, csrf)
 	if w.Code != 413 {
 		t.Fatalf("body > batas harus 413, dapat %d %.200s", w.Code, w.Body.String())
+	}
+}
+
+func TestTruncateMessages(t *testing.T) {
+	app, st, _ := appTestEnv(t)
+	cookie, csrf := loginAs(app, t, "dev@test", "Sandi-Kuat-123")
+	dev, _ := st.GetUserByEmail("dev@test")
+	c, _ := st.CreateConversation(dev.ID, "", "m", "", nil, nil)
+	base := "/api/me/conversations/" + fmtInt(c.ID) + "/messages"
+	ids := []int64{}
+	for _, role := range []string{"user", "assistant", "user", "assistant"} {
+		w := dashReq(app, "POST", base, map[string]any{"role": role, "content": role + " x"}, cookie, csrf)
+		var resp struct {
+			ID int64 `json:"id"`
+		}
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		if w.Code != 200 || resp.ID == 0 {
+			t.Fatalf("save = %d %s", w.Code, w.Body.String())
+		}
+		ids = append(ids, resp.ID)
+	}
+	if w := dashReq(app, "DELETE", base+"?from="+fmtInt(ids[2]), nil, cookie, csrf); w.Code != 200 || !strings.Contains(w.Body.String(), `"deleted":2`) {
+		t.Fatalf("truncate = %d %s", w.Code, w.Body.String())
+	}
+	if msgs, _ := st.ListMessages(c.ID); len(msgs) != 2 {
+		t.Fatalf("remaining = %d, want 2", len(msgs))
+	}
+	if w := dashReq(app, "DELETE", base, nil, cookie, csrf); w.Code != 400 {
+		t.Errorf("missing from = %d, want 400", w.Code)
+	}
+	// percakapan milik user lain → 404
+	admin, _ := st.GetUserByEmail("admin@test")
+	other, _ := st.CreateConversation(admin.ID, "", "m", "", nil, nil)
+	st.AddMessage(other.ID, "user", "rahasia", "", "")
+	if w := dashReq(app, "DELETE", "/api/me/conversations/"+fmtInt(other.ID)+"/messages?from=1", nil, cookie, csrf); w.Code != 404 {
+		t.Errorf("other user's conversation = %d, want 404", w.Code)
+	}
+	if msgs, _ := st.ListMessages(other.ID); len(msgs) != 1 {
+		t.Error("other user's messages must stay")
 	}
 }

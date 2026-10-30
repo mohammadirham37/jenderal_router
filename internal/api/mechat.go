@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -150,12 +151,40 @@ func (a *App) handleSaveMessage(w http.ResponseWriter, r *http.Request) {
 	if req.Role != "user" && req.Role != "assistant" && req.Role != "system" {
 		req.Role = "user"
 	}
-	if _, err := a.st.AddMessageWithMeta(id, req.Role, req.Content, req.Model, "", meta); err != nil {
+	msg, err := a.st.AddMessageWithMeta(id, req.Role, req.Content, req.Model, "", meta)
+	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 	a.st.TouchConversation(id)
-	writeJSON(w, 200, map[string]string{"ok": "true"})
+	writeJSON(w, 200, map[string]any{"ok": "true", "id": msg.ID})
+}
+
+// handleTruncateMessages DELETE /api/me/conversations/{id}/messages?from=<id>
+// — hapus pesan mulai id tersebut (untuk edit pesan & regenerate jawaban).
+func (a *App) handleTruncateMessages(w http.ResponseWriter, r *http.Request) {
+	ai := authFrom(r)
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	c, err := a.st.GetConversation(id)
+	if err != nil || c.UserID != ai.user.ID {
+		writeJSON(w, 404, map[string]string{"error": "percakapan tidak ditemukan"})
+		return
+	}
+	from, err := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64)
+	if err != nil || from <= 0 {
+		writeJSON(w, 400, map[string]string{"error": "parameter from wajib"})
+		return
+	}
+	n, err := a.st.DeleteMessagesFrom(id, from)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	a.st.TouchConversation(id)
+	writeJSON(w, 200, map[string]any{"deleted": n})
 }
 
 // maxChatBody batas body request chat dashboard.
@@ -205,6 +234,11 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 404, map[string]string{"error": err.Error()})
 		return
 	}
+
+	// pangkas riwayat agar muat di context window model tujuan
+	budget, window := a.chatContextBudget(steps)
+	var trimmed int
+	internal.Messages, trimmed = trimForContext(internal.Messages, budget)
 
 	start := time.Now()
 	reqTokens := translate.EstimateMessages(internal.Messages)
@@ -339,6 +373,10 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 		if reasoning.Len() > 0 {
 			meta["reasoning_content"] = reasoning.String()
 		}
+		if trimmed > 0 {
+			meta["context_trimmed"] = trimmed
+			meta["context_window"] = window
+		}
 		wmu.Lock()
 		fmt.Fprintf(w, "data: %s\n\n", jsonCompact(meta))
 		fmt.Fprint(w, "data: [DONE]\n\n")
@@ -362,6 +400,10 @@ func (a *App) handleMeChat(w http.ResponseWriter, r *http.Request) {
 		}
 		if servedModel != "" {
 			chunk["served_model"] = servedModel
+		}
+		if trimmed > 0 {
+			chunk["context_trimmed"] = trimmed
+			chunk["context_window"] = window
 		}
 		wmu.Lock()
 		fmt.Fprintf(w, "data: %s\n\n", renderMeChunk(id, display, chunk))
