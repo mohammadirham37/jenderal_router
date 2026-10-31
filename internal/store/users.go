@@ -35,6 +35,10 @@ func (s *Store) CreateUser(email, password, role string) (*User, error) {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
+	// user baru langsung mendapat kuota default (bila diatur)
+	if err := s.SyncDefaultQuotaForUser(id, role); err != nil {
+		return nil, err
+	}
 	if role == RoleSuperAdmin {
 		// begitu ada super_admin, wizard /api/setup tertutup permanen
 		if err := s.SetSetting(SetupDoneKey, "1"); err != nil {
@@ -139,7 +143,13 @@ func (s *Store) UpdateUserFields(id int64, email, role, status *string, password
 	}
 	_, err = s.DB.Exec(`UPDATE users SET email=?, password_hash=?, role=?, status=?, default_combo_id=? WHERE id=?`,
 		u.Email, hash, u.Role, u.Status, u.DefaultComboID, id)
-	return err
+	if err != nil {
+		return err
+	}
+	if role != nil {
+		return s.SyncDefaultQuotaForUser(id, u.Role)
+	}
+	return nil
 }
 
 // DeleteUser menghapus user (cascade ke key & sesi).

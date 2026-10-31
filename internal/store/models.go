@@ -405,15 +405,17 @@ type Quota struct {
 	UsedRequests int64   `json:"used_requests"`
 	UsedCost     float64 `json:"used_cost"`
 	ResetAt      string  `json:"reset_at"`
+	Source       string  `json:"source"` // default|custom
 }
 
-// PutQuota menyimpan (upsert) kuota dan mengembalikan barisnya.
+// PutQuota menyimpan (upsert) kuota khusus dan mengembalikan barisnya.
+// Baris default yang sudah ada berubah menjadi khusus (pemakaian tetap).
 func (s *Store) PutQuota(scope string, scopeID int64, period string, tokenLimit, requestLimit int64, costLimit float64) (*Quota, error) {
-	_, err := s.DB.Exec(`INSERT INTO quotas (scope, scope_id, period, token_limit, request_limit, cost_limit_usd)
-		VALUES (?,?,?,?,?,?)
+	_, err := s.DB.Exec(`INSERT INTO quotas (scope, scope_id, period, token_limit, request_limit, cost_limit_usd, source)
+		VALUES (?,?,?,?,?,?,'custom')
 		ON CONFLICT(scope, scope_id, period) DO UPDATE SET
 		token_limit = excluded.token_limit, request_limit = excluded.request_limit,
-		cost_limit_usd = excluded.cost_limit_usd`,
+		cost_limit_usd = excluded.cost_limit_usd, source = 'custom'`,
 		scope, scopeID, period, tokenLimit, requestLimit, costLimit)
 	if err != nil {
 		return nil, err
@@ -425,10 +427,10 @@ func (s *Store) PutQuota(scope string, scopeID int64, period string, tokenLimit,
 func (s *Store) GetQuota(scope string, scopeID int64, period string) (*Quota, error) {
 	q := &Quota{}
 	err := s.DB.QueryRow(`SELECT id, scope, scope_id, period, token_limit, request_limit, cost_limit_usd,
-		used_tokens, used_requests, used_cost, reset_at FROM quotas
+		used_tokens, used_requests, used_cost, reset_at, source FROM quotas
 		WHERE scope = ? AND scope_id = ? AND period = ?`, scope, scopeID, period).
 		Scan(&q.ID, &q.Scope, &q.ScopeID, &q.Period, &q.TokenLimit, &q.RequestLimit, &q.CostLimitUSD,
-			&q.UsedTokens, &q.UsedRequests, &q.UsedCost, &q.ResetAt)
+			&q.UsedTokens, &q.UsedRequests, &q.UsedCost, &q.ResetAt, &q.Source)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -441,7 +443,7 @@ func (s *Store) GetQuota(scope string, scopeID int64, period string) (*Quota, er
 // ListQuotasByScope semua kuota milik user atau key.
 func (s *Store) ListQuotasByScope(scope string, scopeID int64) ([]*Quota, error) {
 	rows, err := s.DB.Query(`SELECT id, scope, scope_id, period, token_limit, request_limit, cost_limit_usd,
-		used_tokens, used_requests, used_cost, reset_at FROM quotas
+		used_tokens, used_requests, used_cost, reset_at, source FROM quotas
 		WHERE scope = ? AND scope_id = ? ORDER BY period`, scope, scopeID)
 	if err != nil {
 		return nil, err
@@ -451,7 +453,7 @@ func (s *Store) ListQuotasByScope(scope string, scopeID int64) ([]*Quota, error)
 	for rows.Next() {
 		q := &Quota{}
 		if err := rows.Scan(&q.ID, &q.Scope, &q.ScopeID, &q.Period, &q.TokenLimit, &q.RequestLimit,
-			&q.CostLimitUSD, &q.UsedTokens, &q.UsedRequests, &q.UsedCost, &q.ResetAt); err != nil {
+			&q.CostLimitUSD, &q.UsedTokens, &q.UsedRequests, &q.UsedCost, &q.ResetAt, &q.Source); err != nil {
 			return nil, err
 		}
 		out = append(out, q)
@@ -476,7 +478,7 @@ func (s *Store) ResetQuota(id int64, nextReset string) error {
 // QuotasDueReset kuota yang reset_at-nya lewat (worker reset FR-4.5).
 func (s *Store) QuotasDueReset(nowISO string) ([]*Quota, error) {
 	rows, err := s.DB.Query(`SELECT id, scope, scope_id, period, token_limit, request_limit, cost_limit_usd,
-		used_tokens, used_requests, used_cost, reset_at FROM quotas
+		used_tokens, used_requests, used_cost, reset_at, source FROM quotas
 		WHERE reset_at != '' AND reset_at < ?`, nowISO)
 	if err != nil {
 		return nil, err
@@ -486,7 +488,142 @@ func (s *Store) QuotasDueReset(nowISO string) ([]*Quota, error) {
 	for rows.Next() {
 		q := &Quota{}
 		if err := rows.Scan(&q.ID, &q.Scope, &q.ScopeID, &q.Period, &q.TokenLimit, &q.RequestLimit,
-			&q.CostLimitUSD, &q.UsedTokens, &q.UsedRequests, &q.UsedCost, &q.ResetAt); err != nil {
+			&q.CostLimitUSD, &q.UsedTokens, &q.UsedRequests, &q.UsedCost, &q.ResetAt, &q.Source); err != nil {
+			return nil, err
+		}
+		out = append(out, q)
+	}
+	return out, rows.Err()
+}
+
+// ---- Kuota default (berlaku untuk member & viewer) ----
+
+// QuotaLimits batas satu periode; semua 0 = tidak ada kuota default.
+type QuotaLimits struct {
+	TokenLimit   int64   `json:"token_limit"`
+	RequestLimit int64   `json:"request_limit"`
+	CostLimitUSD float64 `json:"cost_limit_usd"`
+}
+
+// Empty true bila tidak ada batas yang diisi.
+func (l QuotaLimits) Empty() bool {
+	return l.TokenLimit <= 0 && l.RequestLimit <= 0 && l.CostLimitUSD <= 0
+}
+
+// DefaultQuota kuota default per periode (day|month).
+type DefaultQuota map[string]QuotaLimits
+
+const defaultQuotaKey = "default_quota"
+
+// QuotaPeriods periode kuota yang dikenal.
+var QuotaPeriods = []string{"day", "month"}
+
+// rolesWithDefaultQuota role yang dikenai kuota default (admin tidak,
+// agar pengelola tidak terkunci).
+const rolesWithDefaultQuota = `('member','viewer')`
+
+// GetDefaultQuota membaca kuota default dari settings.
+func (s *Store) GetDefaultQuota() DefaultQuota {
+	d := DefaultQuota{}
+	if v, _ := s.GetSetting(defaultQuotaKey); v != "" {
+		_ = json.Unmarshal([]byte(v), &d)
+	}
+	return d
+}
+
+// SetDefaultQuota menyimpan kuota default lalu menerapkannya ke semua
+// member/viewer: baris default diperbarui/ditambah (pemakaian berjalan
+// tetap), baris khusus tidak disentuh, dan periode yang dikosongkan
+// dihapus. Mengembalikan jumlah user yang kini memakai kuota default.
+func (s *Store) SetDefaultQuota(d DefaultQuota) (int64, error) {
+	clean := DefaultQuota{}
+	for _, p := range QuotaPeriods {
+		if l, ok := d[p]; ok && !l.Empty() {
+			clean[p] = l
+		}
+	}
+	b, _ := json.Marshal(clean)
+	if err := s.SetSetting(defaultQuotaKey, string(b)); err != nil {
+		return 0, err
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	for _, p := range QuotaPeriods {
+		l, ok := clean[p]
+		if !ok {
+			if _, err := tx.Exec(`DELETE FROM quotas WHERE scope = 'user' AND source = 'default' AND period = ?`, p); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		if _, err := tx.Exec(`INSERT INTO quotas (scope, scope_id, period, token_limit, request_limit, cost_limit_usd, source)
+			SELECT 'user', id, ?, ?, ?, ?, 'default' FROM users WHERE role IN `+rolesWithDefaultQuota+`
+			ON CONFLICT(scope, scope_id, period) DO UPDATE SET
+			token_limit = excluded.token_limit, request_limit = excluded.request_limit,
+			cost_limit_usd = excluded.cost_limit_usd
+			WHERE quotas.source = 'default'`, p, l.TokenLimit, l.RequestLimit, l.CostLimitUSD); err != nil {
+			return 0, err
+		}
+	}
+	// role admin ke atas tidak memakai kuota default
+	if _, err := tx.Exec(`DELETE FROM quotas WHERE scope = 'user' AND source = 'default'
+		AND scope_id IN (SELECT id FROM users WHERE role NOT IN ` + rolesWithDefaultQuota + `)`); err != nil {
+		return 0, err
+	}
+	var n int64
+	if err := tx.QueryRow(`SELECT COUNT(DISTINCT scope_id) FROM quotas WHERE scope = 'user' AND source = 'default'`).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, tx.Commit()
+}
+
+// SyncDefaultQuotaForUser menyelaraskan kuota default satu user dengan
+// role-nya (dipanggil saat user dibuat atau role berubah).
+func (s *Store) SyncDefaultQuotaForUser(userID int64, role string) error {
+	if role != RoleMember && role != RoleViewer {
+		_, err := s.DB.Exec(`DELETE FROM quotas WHERE scope = 'user' AND scope_id = ? AND source = 'default'`, userID)
+		return err
+	}
+	for p, l := range s.GetDefaultQuota() {
+		if _, err := s.DB.Exec(`INSERT INTO quotas (scope, scope_id, period, token_limit, request_limit, cost_limit_usd, source)
+			VALUES ('user', ?, ?, ?, ?, ?, 'default') ON CONFLICT(scope, scope_id, period) DO NOTHING`,
+			userID, p, l.TokenLimit, l.RequestLimit, l.CostLimitUSD); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UseDefaultQuota menghapus kuota khusus user untuk satu periode lalu
+// memasang kuota default (bila ada) — tombol "kembali ke default". Baris
+// yang sudah default tidak disentuh agar pemakaian berjalan tetap.
+func (s *Store) UseDefaultQuota(userID int64, role, period string) error {
+	if _, err := s.DB.Exec(`DELETE FROM quotas WHERE scope = 'user' AND scope_id = ? AND period = ? AND source = 'custom'`, userID, period); err != nil {
+		return err
+	}
+	return s.SyncDefaultQuotaForUser(userID, role)
+}
+
+// SetQuotaResetAt mengisi jadwal reset tanpa mengubah pemakaian.
+func (s *Store) SetQuotaResetAt(id int64, resetAt string) error {
+	_, err := s.DB.Exec(`UPDATE quotas SET reset_at = ? WHERE id = ?`, resetAt, id)
+	return err
+}
+
+// QuotasWithoutReset kuota yang belum punya jadwal reset.
+func (s *Store) QuotasWithoutReset() ([]*Quota, error) {
+	rows, err := s.DB.Query(`SELECT id, period FROM quotas WHERE reset_at = ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Quota
+	for rows.Next() {
+		q := &Quota{}
+		if err := rows.Scan(&q.ID, &q.Period); err != nil {
 			return nil, err
 		}
 		out = append(out, q)

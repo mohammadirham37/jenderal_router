@@ -1044,6 +1044,10 @@ func (a *App) putQuota(w http.ResponseWriter, r *http.Request, scope string) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+	if q.ResetAt == "" { // kuota baru: jadwalkan reset periode berjalan
+		q.ResetAt = usage.NextResetAt(q.Period, a.cfg.TZ, time.Now())
+		_ = a.st.SetQuotaResetAt(q.ID, q.ResetAt)
+	}
 	a.audit(r, "quota.put", scope+"s/"+fmtInt(id), nil, q)
 	writeJSON(w, 200, map[string]any{"quota": q})
 }

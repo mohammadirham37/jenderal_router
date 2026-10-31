@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jenderal/jenderalrouter/internal/router"
+	"github.com/jenderal/jenderalrouter/internal/store"
 	"github.com/jenderal/jenderalrouter/internal/translate"
 	"github.com/jenderal/jenderalrouter/internal/usage"
 )
@@ -56,6 +57,9 @@ func (a *App) handleMeModels(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleMeUsage(w http.ResponseWriter, r *http.Request) {
 	ai := authFrom(r)
 	type quotaView struct {
+		Scope        string  `json:"scope"` // user|key
+		KeyName      string  `json:"key_name,omitempty"`
+		Source       string  `json:"source"` // default|custom
 		Period       string  `json:"period"`
 		TokenLimit   int64   `json:"token_limit"`
 		UsedTokens   int64   `json:"used_tokens"`
@@ -66,10 +70,28 @@ func (a *App) handleMeUsage(w http.ResponseWriter, r *http.Request) {
 		ResetAt      string  `json:"reset_at"`
 	}
 	quotas := []quotaView{}
-	for _, q := range collectUserKeyQuotas(a.st, ai.user.ID, 0) {
-		quotas = append(quotas, quotaView{Period: q.Period, TokenLimit: q.TokenLimit,
-			UsedTokens: q.UsedTokens, RequestLimit: q.RequestLimit, UsedRequests: q.UsedRequests,
+	add := func(q *store.Quota, keyName string) {
+		quotas = append(quotas, quotaView{Scope: q.Scope, KeyName: keyName, Source: q.Source, Period: q.Period,
+			TokenLimit: q.TokenLimit, UsedTokens: q.UsedTokens, RequestLimit: q.RequestLimit, UsedRequests: q.UsedRequests,
 			CostLimit: q.CostLimitUSD, UsedCost: q.UsedCost, ResetAt: q.ResetAt})
+	}
+	if qs, err := a.st.ListQuotasByScope("user", ai.user.ID); err == nil {
+		for _, q := range qs {
+			add(q, "")
+		}
+	}
+	// kuota per API key aktif (berlaku bersamaan dengan kuota akun)
+	if keys, err := a.st.ListKeysByUser(ai.user.ID); err == nil {
+		for _, k := range keys {
+			if k.RevokedAt != "" {
+				continue
+			}
+			if qs, err := a.st.ListQuotasByScope("key", k.ID); err == nil {
+				for _, q := range qs {
+					add(q, k.Name)
+				}
+			}
+		}
 	}
 	now := time.Now()
 	mine, err := usage.UserTotals(a.st, ai.user.ID, usage.StartOfToday(now), now.Add(time.Minute))

@@ -1,0 +1,57 @@
+import{$ as e,A as t,C as n,F as r,G as i,I as a,J as o,M as s,O as c,Q as l,R as u,U as d,V as f,W as p,X as m,Y as h,Z as ee,_ as te,at as ne,c as g,ct as _,d as v,f as re,g as ie,lt as y,n as b,ot as ae,q as x,r as S,tt as oe,u as C,x as w}from"../chunks/BsxUhkf-.js";import{d as se,f as T,h as E,i as D,l as O,p as k,t as A}from"../chunks/juiye3z6.js";import{n as ce,t as le}from"../chunks/DlaIlmOh.js";import{t as ue}from"../chunks/DoLO0OQY.js";import{t as de}from"../chunks/C1DESm_7.js";import{t as fe}from"../chunks/DyKudE6n.js";import{t as pe}from"../chunks/BP1sOnuU.js";import{t as me}from"../chunks/7EPMwvOG.js";import{t as he}from"../chunks/Cu8r8mBh.js";import{t as ge}from"../chunks/DQnBGMCv.js";var j={name:`database`,size:24,node:[[`ellipse`,{cx:`12`,cy:`5`,rx:`9`,ry:`3`}],[`path`,{d:`M3 5V19A9 3 0 0 0 21 19V5`}],[`path`,{d:`M3 12A9 3 0 0 0 21 12`}]]};j.node;var M=new Set([`$$slots`,`$$events`,`$$legacy`]);function _e(e,t){let n=b(t,M);E(e,S(()=>n,{get icon(){return j}}))}var ve=s(`<div class="badge warn">Dipaksa menyala oleh env JR_LOG_PROMPTS di server.</div>`),ye=s(`<span class="muted small">(hanya super admin yang bisa mengubah)</span>`),be=s(`<label class="kv" style="cursor:pointer"><input type="checkbox" style="width:auto;margin:0"/> <span>Catat isi semua request API</span> <!></label>`),xe=s(`<span class="muted small"><span class="spinner dark"></span> memeriksa cloudflared di host…</span>`),Se=s(`<span class="badge ok"><span class="dot"></span>active</span>`),Ce=s(`<span class="badge warn"> </span>`),we=s(`<span class="muted">belum ada</span>`),Te=s(`<span class="badge ok"><span class="dot pulse"></span>berjalan</span>`),Ee=s(`<span class="badge warn">tidak berjalan</span>`),De=s(`<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0"><span class="muted" style="min-width:170px">Hostname:</span> <span class="mono"> </span></div> <div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0"><span class="muted" style="min-width:170px">Ingress ke:</span> <span class="mono"> </span></div>`,1),Oe=s(`<div class="kv small" style="margin-bottom:10px"><span class="muted" style="min-width:170px">Binary cloudflared:</span> <span> </span></div> <div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0"><span class="muted" style="min-width:170px">Service systemd:</span> <!></div> <div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0"><span class="muted" style="min-width:170px">Proses tunnel:</span> <!></div> <!> <div class="row" style="margin:10px 0"><button class="btn ghost sm"><!> Periksa ulang</button> <span class="grow"></span> <button>1. Daftar di Cloudflare</button> <button>2. Pemasangan di server</button> <button class="btn ghost sm"><!> Salin</button></div> <pre class="logbox" style="max-height:340px;overflow:auto"> </pre> <p class="muted small" style="margin:8px 0 0">Streaming chat & API aman lewat tunnel (heartbeat otomatis tiap 15 dtk);
+			hindari mode non-streaming untuk jawaban &gt;100 dtk — itu batas platform Cloudflare.
+			Tunnel juga otomatis membuat DNS (CNAME) + sertifikat SSL — tidak perlu membuka port.</p>`,1),ke=s(`<button class="btn ghost sm">Periksa host</button>`),Ae=s(`<div class="kv small" style="border-bottom:1px solid var(--border);padding:4px 0"><span class="muted mono" style="min-width:150px"> </span> <span class="mono"> </span> <span class="muted"> </span></div>`),je=s(`<span class="muted small"> </span>`),Me=s(`<div class="page-head"><h1 class="page-title"><!> </h1></div> <div class="card"><h2>Notifikasi (v1.1)</h2> <label for="f-tg-token">Telegram bot token</label> <input id="f-tg-token" type="password" autocomplete="off"/> <label for="f-tg-chat">Telegram chat id</label> <input id="f-tg-chat"/> <div class="modal-actions" style="justify-content:flex-start;margin-top:12px"><button class="btn"><!> </button></div></div> <div class="card"><h2><!> Pencatatan isi request API</h2> <p class="muted small" style="margin:0 0 10px">Saklar global: isi request &amp; jawaban <b>semua</b> API key dicatat. Untuk user/key tertentu saja, gunakan saklar di
+		halaman detail user. Isi disimpan 7 hari lalu dikosongkan otomatis; rahasia yang dikenali disamarkan; setiap pembukaan
+		tercatat di audit log.</p> <!></div> <div class="card"><h2><!> Backup</h2> <p class="muted small">Backup harian otomatis ke <code>data/backups/</code> (retensi 7 salinan).</p> <button class="btn"><!> </button></div> <div class="card"><h2><!> Pembaruan Aplikasi</h2> <p class="muted small" style="margin:0 0 10px">Tarik versi terbaru, build, pasang, dan rollback kini ada di menu tersendiri.</p> <a class="btn ghost sm" href="/update"><!> </a></div> <div class="card"><h2><!> Cloudflare Tunnel</h2> <p class="muted small" style="margin:0 0 10px">Akses web UI & API dari internet tanpa membuka port — lewat tunnel Cloudflare.
+		Streaming chat sudah mengirim heartbeat berkala, jadi batas idle Cloudflare
+		(~100 dtk) dan cloudflared (~90 dtk) tidak memutus jawaban panjang.</p> <!></div> <div class="card"><h2><!> </h2> <!></div>`,1);function N(r,s){ae(s,!0);let b=e(!1),S=e(!1),E=oe(()=>se(O.me?.role||``,`super_admin`));async function j(e){try{await A.put(`/api/admin/settings`,{log_content:e?`true`:`false`}),l(b,e,!0),k(e?`Isi semua request API kini dicatat (7 hari)`:`Pencatatan isi global dimatikan`,`ok`)}catch(e){k(e.message,`err`)}}let M=e(``),N=e(``),Ne=e(!1);async function Pe(){try{await A.put(`/api/admin/settings`,{notification_telegram_token:u(M),notification_chat_id:u(N)}),k(T(`save`)+` ✓`,`ok`)}catch(e){k(e.message,`err`)}}let P=e(null),F=e(!1),I=e(`daftar`);async function L(){l(F,!0);try{l(P,await A.get(`/api/admin/system/cloudflare`),!0)}catch(e){k(e.message,`err`)}l(F,!1)}p(()=>{L()});function Fe(){return u(I)===`daftar`?`YANG HARUS DIDAFTARKAN DI DASHBOARD CLOUDFLARE
+=================================================
+
+1) DOMAIN AKTIF DI CLOUDFLARE
+   - Masuk dash.cloudflare.com → "Add a domain" → masukkan domain Anda
+   - Pilih paket FREE (cukup)
+   - Arahkan nameserver domain Anda ke 2 nameserver yang Cloudflare berikan
+     (di registrar tempat Anda membeli domain)
+   - Tunggu status domain: ACTIVE
+
+2) BUAT TUNNEL (tanpa CLI)
+   - Dashboard Cloudflare → menu "Zero Trust" (one-time setup singkat)
+   - Networks → Tunnels → "Create a tunnel"
+   - Pilih konektor "Cloudflared" → beri nama, mis. jenderal
+   - Di langkah "Install and run a connector": pilih Debian / 64-bit
+   - SALIN perintah yang ditampilkan — berisi token unik tunnel Anda:
+       sudo cloudflared service install <TOKEN-PANJANG>
+     (perintah ini sekaligus memasang service otomatis di server)
+
+3) DAFTARKAN HOSTNAME PUBLIK (masih di wizard yang sama)
+   - Subdomain : chat        Domain : domainanda.com
+   - Path      : (kosongkan)
+   - Service   : HTTP  →  URL: 127.0.0.1:20130
+   - Klik "Save tunnel"
+   → CNAME ke <ID>.cfargotunnel.com + sertifikat SSL dibuat OTOMATIS
+
+4) CEK STATUS
+   - Networks → Tunnels → tunnel "jenderal" harus berstatus HEALTHY
+   - Buka https://chat.domainanda.com — selesai, tanpa buka port`:`PEMASANGAN DI SERVER (metode CLI / lokal-managed)
+=================================================
+
+# 1) pasang cloudflared
+sudo curl -L --output /usr/local/bin/cloudflared \\
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+sudo chmod +x /usr/local/bin/cloudflared
+
+# 2) autentikasi & buat tunnel (butuh akun Cloudflare + domain)
+cloudflared tunnel login
+cloudflared tunnel create jenderal
+
+# 3) /etc/cloudflared/config.yml
+tunnel: <ID-tunnel>
+credentials-file: /root/.cloudflared/<ID-tunnel>.json
+ingress:
+  - hostname: chat.domainanda.com
+    service: http://${u(P)?.gateway_addr||`127.0.0.1:20130`}
+  - service: http_status:404
+
+# 4) daftarkan DNS & jalankan sebagai service
+cloudflared tunnel route dns jenderal chat.domainanda.com
+sudo cloudflared service install`}async function Ie(){await le(Fe())?k(`panduan disalin ✓`,`ok`):k(`gagal menyalin — salin manual`,`err`)}async function Le(){try{await A.post(`/api/admin/system/backup`),k(T(`save`)+` ✓`,`ok`)}catch(e){k(e.message,`err`)}}p(()=>{(async()=>{try{let e=await A.get(`/api/admin/settings`);l(Ne,e.settings.notification_telegram_token_set===`true`),l(N,e.settings.notification_chat_id||``,!0),l(b,e.settings.log_content===`true`),l(S,e.settings.log_prompts===`true`)}catch{}})()});let Re=e(ee([]));p(()=>{A.get(`/api/admin/audit?limit=30`).then(e=>l(Re,e.audit||[],!0)).catch(()=>{})});var ze=Me();te(`1i19ct2`,e=>{f(e=>{i.title=`${e??``} — JenderalRouter`},[()=>T(`settings`)])});var R=o(ze),Be=x(R),Ve=x(Be);ge(Ve,{size:20});var He=m(Ve);y(Be),y(R);var z=m(R,2),B=m(x(z),4);C(B);var V=m(B,4);C(V);var Ue=m(V,2),H=x(Ue),We=x(H);me(We,{size:15});var Ge=m(We);y(H),y(Ue),y(z);var U=m(z,2),W=x(U),Ke=x(W);ue(Ke,{size:15}),_(),y(W);var qe=m(W,4),Je=e=>{var n=ve();t(e,n)},Ye=e=>{var r=be(),i=x(r);C(i);var o=m(i,4),s=e=>{var n=ye();t(e,n)};n(o,e=>{u(E)||e(s)}),y(r),d(()=>{re(i,u(b)),i.disabled=!u(E)}),a(`change`,i,e=>j(e.currentTarget.checked)),t(e,r)};n(qe,e=>{u(S)?e(Je):e(Ye,-1)}),y(U);var G=m(U,2),K=x(G);_e(x(K),{size:15}),_(),y(K);var q=m(K,4),Xe=x(q);_e(Xe,{size:15});var Ze=m(Xe);y(q),y(G);var J=m(G,2),Y=x(J),Qe=x(Y);pe(Qe,{size:15}),_(),y(Y);var X=m(Y,4),$e=x(X);pe($e,{size:13});var et=m($e);y(X),y(J);var Z=m(J,2),Q=x(Z),tt=x(Q);de(tt,{size:15}),_(),y(Q);var nt=m(Q,4),rt=e=>{var n=xe();t(e,n)},it=e=>{var r=Oe(),i=o(r),s=m(x(i),2),f=h(s,!0);y(i);var p=m(i,2),ee=m(x(p),2),te=e=>{var n=Se();t(e,n)},ne=e=>{var n=Ce(),r=h(n,!0);d(()=>c(r,u(P).service_state)),t(e,n)},g=e=>{var n=we();t(e,n)};n(ee,e=>{u(P).service_state===`active`?e(te):u(P).service_state?e(ne,1):e(g,-1)}),y(p);var v=m(p,2),re=m(x(v),2),b=e=>{var n=Te();t(e,n)},ae=e=>{var n=Ee();t(e,n)};n(re,e=>{u(P).running?e(b):e(ae,-1)}),y(v);var S=m(v,2),oe=e=>{var n=De(),r=o(n),i=m(x(r),2),a=h(i,!0);y(r);var s=m(r,2),l=m(x(s),2),f=h(l,!0);y(s),d(()=>{c(a,u(P).hostname||`—`),c(f,u(P).ingress_service||`—`)}),t(e,n)};n(S,e=>{u(P).config_found&&e(oe)});var C=m(S,2),w=x(C),se=x(w);fe(se,{size:13}),_(),y(w);var T=m(w,4);let E;var D=m(T,2);let O;var k=m(D,2),A=x(k);ce(A,{size:13}),_(),y(k),y(C);var le=m(C,2),ue=h(le,!0);_(2),d(e=>{c(f,u(P).installed?`✓ terpasang`:`✗ belum terpasang`),E=ie(T,1,`btn sm`,null,E,{ghost:u(I)!==`daftar`}),O=ie(D,1,`btn sm`,null,O,{ghost:u(I)!==`server`}),c(ue,e)},[()=>Fe()]),a(`click`,w,L),a(`click`,T,()=>l(I,`daftar`)),a(`click`,D,()=>l(I,`server`)),a(`click`,k,Ie),t(e,r)},at=e=>{var n=ke();a(`click`,n,L),t(e,n)};n(nt,e=>{u(F)&&!u(P)?e(rt):u(P)?e(it,1):e(at,-1)}),y(Z);var ot=m(Z,2),$=x(ot),st=x($);he(st,{size:15});var ct=m(st);y($);var lt=m($,2);w(lt,17,()=>u(Re),e=>e.id,(e,n)=>{var r=Ae(),i=x(r),a=h(i,!0),o=m(i,2),s=h(o,!0),l=m(o,2),f=h(l,!0);y(r),d(e=>{c(a,e),c(s,u(n).action),c(f,u(n).target)},[()=>D(u(n).ts)]),t(e,r)},e=>{var n=je(),r=h(n,!0);d(e=>c(r,e),[()=>T(`no_data`)]),t(e,n)}),y(ot),d((e,t,n,r,i)=>{c(He,` ${e??``}`),v(B,`placeholder`,u(Ne)?`tersimpan — isi untuk mengganti`:`123456:ABC…`),c(Ge,` ${t??``}`),c(Ze,` ${n??``}`),c(et,` Buka ${r??``}`),c(ct,` ${i??``}`)},[()=>T(`settings`),()=>T(`save`),()=>T(`backup_now`),()=>T(`system_update`),()=>T(`audit_log`)]),g(B,()=>u(M),e=>l(M,e)),g(V,()=>u(N),e=>l(N,e)),a(`click`,H,Pe),a(`click`,q,Le),t(r,ze),ne()}r([`click`,`change`]);export{N as component};

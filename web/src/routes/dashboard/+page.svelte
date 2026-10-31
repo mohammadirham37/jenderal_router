@@ -3,6 +3,7 @@
 	import { api, fmtNum, fmtCost, truncate, fmtTs } from '#lib/api.js';
 	import { app, t, toast, roleAtLeast } from '#lib/stores.svelte.js';
 	import Stat from '#lib/components/Stat.svelte';
+	import QuotaCard from '#lib/components/QuotaCard.svelte';
 
 	type Summary = {
 		totals: any;
@@ -100,6 +101,8 @@
 		<Stat icon={KeyRound} label={t('keys')} value={String(myActiveKeys)} sub={t('usage_api')} />
 	</div>
 
+	<QuotaCard quotas={mine?.quotas ?? []} />
+
 	<div class="card" style="margin-top:14px">
 		<h2><KeyRound size={15} /> {t('usage_api')}</h2>
 		<p class="muted small" style="margin:0 0 8px">
@@ -115,13 +118,6 @@
 		{:else}
 			<span class="muted small">Belum punya API key — minta admin membuatkan.</span>
 		{/each}
-		{#if mine?.quotas?.length}
-			<div class="kv small" style="margin-top:8px">
-				{#each mine.quotas as q (q.period)}
-					<span class="badge info">{q.period}: {q.used_tokens}/{q.token_limit || '∞'} token</span>
-				{/each}
-			</div>
-		{/if}
 	</div>
 
 	<div class="card" style="margin-top:14px">

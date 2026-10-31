@@ -84,16 +84,34 @@ func NextResetAt(period, tz string, now time.Time) string {
 	return next.UTC().Format(time.RFC3339)
 }
 
+// ScheduleMissingResets memberi jadwal reset pada kuota yang belum punya
+// (kuota baru, atau kuota lama sebelum perbaikan ini yang tidak pernah
+// reset). Pemakaiannya dinolkan: periode baru dimulai sekarang.
+func ScheduleMissingResets(st *store.Store, tz string, now time.Time) {
+	qs, err := st.QuotasWithoutReset()
+	if err != nil {
+		slog.Error("queri kuota tanpa jadwal reset gagal", "err", err)
+		return
+	}
+	for _, q := range qs {
+		if err := st.ResetQuota(q.ID, NextResetAt(q.Period, tz, now)); err != nil {
+			slog.Error("menjadwalkan reset kuota gagal", "quota", q.ID, "err", err)
+		}
+	}
+}
+
 // ResetWorker memeriksa kuota jatuh tempo tiap menit dan meresetnya.
 func ResetWorker(st *store.Store, tz string, stop <-chan struct{}) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
+	ScheduleMissingResets(st, tz, time.Now())
 	for {
 		select {
 		case <-stop:
 			return
 		case <-ticker.C:
 			now := time.Now()
+			ScheduleMissingResets(st, tz, now)
 			due, err := st.QuotasDueReset(now.UTC().Format(time.RFC3339))
 			if err != nil {
 				slog.Error("queri kuota jatuh tempo gagal", "err", err)

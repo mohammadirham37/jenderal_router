@@ -119,14 +119,67 @@
 	}
 
 	// ---- kuota ----
+	// Bentuk form satu periode: angka sebagai string agar input kosong = 0 (tanpa batas).
+	type QForm = { token: string; req: string; cost: string };
+	const PERIODS: { p: 'day' | 'month'; label: string }[] = [{ p: 'day', label: 'Harian' }, { p: 'month', label: 'Bulanan' }];
+	const toForm = (l: any): QForm => ({ token: String(l?.token_limit || ''), req: String(l?.request_limit || ''), cost: String(l?.cost_limit_usd || '') });
+	const fromForm = (f: QForm) => ({ token_limit: Math.max(0, Math.floor(+f.token || 0)), request_limit: Math.max(0, Math.floor(+f.req || 0)), cost_limit_usd: Math.max(0, +f.cost || 0) });
+	const limitText = (l: any) => {
+		const parts = [];
+		if (l?.token_limit > 0) parts.push(fmtNum(l.token_limit) + ' token');
+		if (l?.request_limit > 0) parts.push(fmtNum(l.request_limit) + ' request');
+		if (l?.cost_limit_usd > 0) parts.push('$' + l.cost_limit_usd);
+		return parts.length ? parts.join(' · ') : 'tanpa batas';
+	};
+
+	// kuota default: langsung berlaku untuk semua member & viewer (lama dan baru)
+	let showDefault = $state(false);
+	let dq = $state<Record<string, QForm>>({ day: toForm(null), month: toForm(null) });
+	let dqInfo = $state<any>(null);
+	let dqSaving = $state(false);
+	async function openDefault() {
+		try {
+			dqInfo = await api.get('/api/admin/quota-default');
+			dq = { day: toForm(dqInfo.default?.day), month: toForm(dqInfo.default?.month) };
+			showDefault = true;
+		} catch (e: any) { toast(e.message, 'err'); }
+	}
+	async function saveDefault() {
+		dqSaving = true;
+		try {
+			const r = await api.put('/api/admin/quota-default', { day: fromForm(dq.day), month: fromForm(dq.month) });
+			showDefault = false;
+			toast(`Kuota default disimpan & diterapkan ke ${r.users_default} user ✓`, 'ok');
+		} catch (e: any) { toast(e.message, 'err'); }
+		dqSaving = false;
+	}
+
+	// kuota per user: tiap periode "ikuti default" atau "khusus"
 	let qFor = $state<any>(null);
-	let qDayTok = $state('0'); let qDayReq = $state('0'); let qDayCost = $state('0');
-	let qMonTok = $state('0'); let qMonCost = $state('0');
+	let qDefault = $state<any>({});
+	let qMode = $state<Record<string, 'default' | 'custom'>>({ day: 'default', month: 'default' });
+	let qModeOrig: Record<string, 'default' | 'custom'> = {};
+	let qf = $state<Record<string, QForm>>({ day: toForm(null), month: toForm(null) });
+	async function openQuota(u: any) {
+		try {
+			const r = await api.get(`/api/admin/users/${u.id}/quota`);
+			qDefault = r.default || {};
+			for (const { p } of PERIODS) {
+				const row = (r.quotas || []).find((q: any) => q.period === p);
+				qMode[p] = row?.source === 'custom' ? 'custom' : 'default';
+				qModeOrig[p] = qMode[p];
+				qf[p] = toForm(row?.source === 'custom' ? row : qDefault[p]);
+			}
+			qFor = u;
+		} catch (e: any) { toast(e.message, 'err'); }
+	}
 	async function saveQuota() {
 		if (!qFor) return;
 		try {
-			await api.put(`/api/admin/users/${qFor.id}/quota`, { period: 'day', token_limit: +qDayTok || 0, request_limit: +qDayReq || 0, cost_limit_usd: +qDayCost || 0 });
-			await api.put(`/api/admin/users/${qFor.id}/quota`, { period: 'month', token_limit: +qMonTok || 0, cost_limit_usd: +qMonCost || 0 });
+			for (const { p } of PERIODS) {
+				if (qMode[p] === 'custom') await api.put(`/api/admin/users/${qFor.id}/quota`, { period: p, ...fromForm(qf[p]) });
+				else if (qModeOrig[p] === 'custom') await api.del(`/api/admin/users/${qFor.id}/quota?period=${p}`);
+			}
 			qFor = null;
 			toast(t('save') + ' ✓', 'ok');
 		} catch (e: any) { toast(e.message, 'err'); }
@@ -147,9 +200,14 @@
 
 <div class="page-head">
 	<h1 class="page-title"><Users size={20} /> {t('users')}</h1>
-	<button class="btn" onclick={() => { showUser = true; uEmail = ''; uPass = ''; uRole = 'member'; }}>
-		<Plus size={16} /> {t('create_user')}
-	</button>
+	<div class="row">
+		<button class="btn ghost" onclick={openDefault} title="Kuota yang otomatis berlaku untuk semua member & viewer, lama maupun baru">
+			<Gauge size={16} /> Kuota default
+		</button>
+		<button class="btn" onclick={() => { showUser = true; uEmail = ''; uPass = ''; uRole = 'member'; }}>
+			<Plus size={16} /> {t('create_user')}
+		</button>
+	</div>
 </div>
 
 <div class="grid cols-4">
@@ -220,7 +278,7 @@
 					</div>
 					<div class="uc-actions">
 						<a class="btn ghost sm" href="/users/{u.id}"><ChartLine size={13} /> Detail</a>
-						<button class="btn ghost sm" onclick={() => { qFor = u; loadKeys(u); }}><Gauge size={13} /> {t('quota')}</button>
+						<button class="btn ghost sm" onclick={() => openQuota(u)}><Gauge size={13} /> {t('quota')}</button>
 						<button class="btn ghost sm" onclick={() => { keyFor = u; plaintext = ''; kName = ''; loadKeys(u); }}><KeyRound size={13} /> {t('api_key')}</button>
 						<button class="btn danger sm" onclick={() => delUser(u)}><Trash2 size={13} /></button>
 					</div>
@@ -304,29 +362,67 @@
 	</Modal>
 {/if}
 
-{#if qFor}
-	<Modal
-		title={`${t('quota')} — ${qFor.email}`}
-		onclose={() => qFor = null}
-	>
-		<label for="f-q-day-tok">Kuota harian — token</label>
-		<input id="f-q-day-tok" bind:value={qDayTok} placeholder="0 = tanpa batas" />
-		<label for="f-q-day-req">Kuota harian — request</label>
-		<input id="f-q-day-req" bind:value={qDayReq} placeholder="0 = tanpa batas" />
-		<label for="f-q-day-cost">Kuota harian — biaya (USD)</label>
-		<input id="f-q-day-cost" bind:value={qDayCost} placeholder="0 = tanpa batas" />
-		<label for="f-q-mon-tok">Kuota bulanan — token</label>
-		<input id="f-q-mon-tok" bind:value={qMonTok} placeholder="0 = tanpa batas" />
-		<label for="f-q-mon-cost">Kuota bulanan — biaya (USD)</label>
-		<input id="f-q-mon-cost" bind:value={qMonCost} placeholder="0 = tanpa batas" />
+{#snippet quotaFields(f: QForm, id: string, disabled = false)}
+	<div class="qfields">
+		<label for="{id}-tok">Token<input id="{id}-tok" type="number" min="0" bind:value={f.token} placeholder="tanpa batas" {disabled} /></label>
+		<label for="{id}-req">Request<input id="{id}-req" type="number" min="0" bind:value={f.req} placeholder="tanpa batas" {disabled} /></label>
+		<label for="{id}-cost">Biaya (USD)<input id="{id}-cost" type="number" min="0" step="0.01" bind:value={f.cost} placeholder="tanpa batas" {disabled} /></label>
+	</div>
+{/snippet}
+
+{#if showDefault}
+	<Modal title="Kuota default" onclose={() => (showDefault = false)}>
+		<p class="muted small" style="margin:0 0 10px">
+			Berlaku otomatis untuk <b>semua member &amp; viewer</b>, termasuk user yang dibuat nanti. Admin tidak dikenai.
+			User dengan kuota khusus tetap memakai kuota khususnya. Kosongkan semua kolom satu periode untuk menghapusnya.
+			Pemakaian berjalan tidak direset saat batas diubah.
+		</p>
+		{#if dqInfo}
+			<p class="small" style="margin:0 0 10px">
+				Saat ini: <b>{dqInfo.users_default}</b> user memakai kuota default ·
+				<b>{dqInfo.users_custom}</b> user punya kuota khusus.
+			</p>
+		{/if}
+		{#each PERIODS as { p, label } (p)}
+			<h3 class="qhead">{label} <span class="muted small">(reset tiap {p === 'day' ? 'tengah malam' : 'awal bulan'} WIB)</span></h3>
+			{@render quotaFields(dq[p], 'dq-' + p)}
+		{/each}
 		<div class="modal-actions">
-			<button class="btn ghost" onclick={() => qFor = null}>{t('cancel')}</button>
+			<button class="btn ghost" onclick={() => (showDefault = false)}>{t('cancel')}</button>
+			<button class="btn" onclick={saveDefault} disabled={dqSaving}>
+				{#if dqSaving}<span class="spinner"></span>{/if} Simpan &amp; terapkan ke semua user
+			</button>
+		</div>
+	</Modal>
+{/if}
+
+{#if qFor}
+	<Modal title={`${t('quota')} — ${qFor.email}`} onclose={() => (qFor = null)}>
+		{#if qFor.role !== 'member' && qFor.role !== 'viewer'}
+			<p class="muted small" style="margin:0 0 10px">Role {qFor.role} tidak dikenai kuota default — "ikuti default" berarti tanpa batas.</p>
+		{/if}
+		{#each PERIODS as { p, label } (p)}
+			<h3 class="qhead">{label}</h3>
+			<div class="row small" style="margin-bottom:6px">
+				<label class="qmode"><input type="radio" bind:group={qMode[p]} value="default" /> Ikuti default <span class="muted">({limitText(qDefault[p])})</span></label>
+				<label class="qmode"><input type="radio" bind:group={qMode[p]} value="custom" /> Khusus untuk user ini</label>
+			</div>
+			{#if qMode[p] === 'custom'}{@render quotaFields(qf[p], 'qf-' + p)}{/if}
+		{/each}
+		<div class="modal-actions">
+			<button class="btn ghost" onclick={() => (qFor = null)}>{t('cancel')}</button>
 			<button class="btn" onclick={saveQuota}>{t('save')}</button>
 		</div>
 	</Modal>
 {/if}
 
 <style>
+	.qhead { font-size: 13.5px; margin: 14px 0 6px; }
+	.qfields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+	.qfields label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; margin: 0; }
+	.qmode { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; margin: 0 12px 0 0; }
+	.qmode input { width: auto; margin: 0; }
+	@media (max-width: 560px) { .qfields { grid-template-columns: 1fr; } }
 	.ucard {
 		border: 1px solid var(--border);
 		border-radius: 12px;

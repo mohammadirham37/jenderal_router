@@ -17,14 +17,14 @@ import (
 
 func TestMaskSecrets(t *testing.T) {
 	cases := map[string]string{
-		"pakai sk-proj-abcdefghijklmnopqrstuv123 ya":         "pakai sk-p…[disamarkan] ya",
+		"pakai sk-proj-abcdefghijklmnopqrstuv123 ya":        "pakai sk-p…[disamarkan] ya",
 		"key jr-0123456789abcdefghijklmnopqrstuv0123456789": "key jr-0…[disamarkan]",
-		"Authorization: Bearer abcdefghijklmnop.qrstuvwxyz":  "Authorization: Bearer [disamarkan]",
-		`{"password": "rahasia123"}`:                         `{"password": "[disamarkan]"}`,
-		"kata sandi=Bismillah12":                             "kata sandi=[disamarkan]",
-		"kartu 4111 1111 1111 1111 berlaku":                  "kartu [kartu ****1111] berlaku",
-		"nomor 1234567890123 bukan kartu":                    "nomor 1234567890123 bukan kartu", // gagal Luhn
-		"teks biasa tanpa rahasia":                           "teks biasa tanpa rahasia",
+		"Authorization: Bearer abcdefghijklmnop.qrstuvwxyz": "Authorization: Bearer [disamarkan]",
+		`{"password": "rahasia123"}`:                        `{"password": "[disamarkan]"}`,
+		"kata sandi=Bismillah12":                            "kata sandi=[disamarkan]",
+		"kartu 4111 1111 1111 1111 berlaku":                 "kartu [kartu ****1111] berlaku",
+		"nomor 1234567890123 bukan kartu":                   "nomor 1234567890123 bukan kartu", // gagal Luhn
+		"teks biasa tanpa rahasia":                          "teks biasa tanpa rahasia",
 	}
 	for in, want := range cases {
 		if got := maskSecrets(in); got != want {
