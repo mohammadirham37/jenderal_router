@@ -3,14 +3,16 @@
 	import { api, fmtCost, fmtTs } from '#lib/api.js';
 	import { t } from '#lib/stores.svelte.js';
 	import LogContentModal from '#lib/components/LogContentModal.svelte';
+	import { page } from '$app/state';
 
 	let openLog = $state<string | null>(null);
 
 	let logs = $state<any[]>([]);
 	let loading = $state(true);
-	let fUser = $state('');
-	let fProvider = $state('');
-	let fStatus = $state('');
+	// filter awal bisa dari URL, mis. /logs?status=5xx (tautan dari Ringkasan)
+	let fUser = $state(page.url.searchParams.get('user') ?? '');
+	let fProvider = $state(page.url.searchParams.get('provider') ?? '');
+	let fStatus = $state(page.url.searchParams.get('status') ?? '');
 
 	async function load() {
 		loading = true;

@@ -1,4 +1,8 @@
 <script lang="ts">
+	import '@fontsource-variable/plus-jakarta-sans';
+	import '@fontsource-variable/jetbrains-mono';
+	import '@fontsource/instrument-serif/latin-400.css';
+	import '@fontsource/instrument-serif/latin-400-italic.css';
 	import '../app.css';
 	import { page, updated } from '$app/state';
 	import { goto } from '$app/navigation';
