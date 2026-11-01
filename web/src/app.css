@@ -372,3 +372,27 @@ input[type='checkbox'] { width: auto; }
 .spinner { width: 15px; height: 15px; border: 2px solid rgb(255 255 255 / 0.35); border-top-color: #fff; border-radius: 999px; animation: spin 0.7s linear infinite; display: inline-block; }
 .spinner.dark { border-color: var(--border-strong); border-top-color: var(--accent); }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- markdown hasil md() di luar halaman chat (modal log, riwayat chat admin) ---- */
+.md-render { overflow-wrap: anywhere; }
+.md-render > :first-child { margin-top: 0; }
+.md-render > :last-child { margin-bottom: 0; }
+.md-render code {
+	font-family: var(--mono); font-size: 0.86em; padding: 1px 6px; border-radius: 6px;
+	background: var(--surface-3); border: 1px solid var(--border);
+}
+.md-render .code-block { margin: 6px 0 12px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg); }
+.md-render .code-head {
+	display: flex; justify-content: space-between; align-items: center; padding: 5px 10px;
+	font-size: 11.5px; color: var(--muted); background: var(--surface-2); border-bottom: 1px solid var(--border);
+	font-family: var(--mono);
+}
+.md-render .code-copy {
+	all: unset; cursor: pointer; font-family: var(--font); font-size: 11.5px; color: var(--muted);
+	padding: 2px 8px; border-radius: 6px;
+}
+.md-render .code-copy:hover { color: var(--text); background: var(--surface-3); }
+.md-render pre { margin: 0; padding: 10px 12px; overflow-x: auto; }
+.md-render pre code { background: none; border: 0; padding: 0; font-size: 12.5px; line-height: 1.55; }
+.md-render .table-scroll { overflow-x: auto; margin: 6px 0 12px; border: 1px solid var(--border); border-radius: 10px; }
+.md-render table { border-collapse: collapse; width: 100%; font-size: 13px; }

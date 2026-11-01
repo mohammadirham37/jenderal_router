@@ -323,7 +323,7 @@
 					</div>
 					{#if m.role === 'assistant'}
 						<!-- md() meng-escape HTML sebelum merender markdown -->
-						<div class="cbody md">{@html md(m.content)}</div>
+						<div class="cbody md-render">{@html md(m.content)}</div>
 					{:else}
 						<div class="cbody plain">{m.content}</div>
 					{/if}
