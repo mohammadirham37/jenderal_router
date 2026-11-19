@@ -632,11 +632,103 @@ func (a *App) handleListUsers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+	sum := a.userSummaries()
+	actor := authFrom(r).user
 	out := []map[string]any{}
 	for _, u := range users {
-		out = append(out, map[string]any{"user": u.Public()})
+		row := map[string]any{"user": u.Public(), "can_manage": canManageUser(actor, u)}
+		if us := sum[u.ID]; us != nil {
+			row["summary"] = us
+		} else {
+			row["summary"] = &userSummary{}
+		}
+		out = append(out, row)
 	}
 	writeJSON(w, 200, map[string]any{"users": out})
+}
+
+// userSummary ringkasan per user untuk daftar User (tanpa N+1 request).
+type userSummary struct {
+	KeysActive  int     `json:"keys_active"`
+	KeysTotal   int     `json:"keys_total"`
+	LastActive  string  `json:"last_active,omitempty"`
+	QuotaPct    float64 `json:"quota_pct"`              // pemakaian kuota tersempit (0 bila tanpa kuota)
+	QuotaLabel  string  `json:"quota_label,omitempty"`  // mis. "token harian"
+	QuotaSource string  `json:"quota_source,omitempty"` // default|custom|""
+	LogContent  bool    `json:"log_content"`
+}
+
+// userSummaries menghitung ringkasan semua user dalam beberapa query agregat.
+func (a *App) userSummaries() map[int64]*userSummary {
+	out := map[int64]*userSummary{}
+	get := func(id int64) *userSummary {
+		if out[id] == nil {
+			out[id] = &userSummary{}
+		}
+		return out[id]
+	}
+	if rows, err := a.st.DB.Query(`SELECT user_id, COUNT(*), SUM(CASE WHEN revoked_at = '' THEN 1 ELSE 0 END) FROM api_keys GROUP BY user_id`); err == nil {
+		for rows.Next() {
+			var id int64
+			var total, active int
+			if rows.Scan(&id, &total, &active) == nil {
+				s := get(id)
+				s.KeysTotal, s.KeysActive = total, active
+			}
+		}
+		rows.Close()
+	}
+	if rows, err := a.st.DB.Query(`SELECT user_id, MAX(ts) FROM request_logs WHERE user_id IS NOT NULL GROUP BY user_id`); err == nil {
+		for rows.Next() {
+			var id int64
+			var ts string
+			if rows.Scan(&id, &ts) == nil {
+				get(id).LastActive = ts
+			}
+		}
+		rows.Close()
+	}
+	if rows, err := a.st.DB.Query(`SELECT scope_id, period, source, token_limit, used_tokens, request_limit, used_requests,
+		cost_limit_usd, used_cost FROM quotas WHERE scope = 'user'`); err == nil {
+		for rows.Next() {
+			var id int64
+			var period, source string
+			var tl, tu, rl, ru int64
+			var cl, cu float64
+			if rows.Scan(&id, &period, &source, &tl, &tu, &rl, &ru, &cl, &cu) != nil {
+				continue
+			}
+			s := get(id)
+			per := "harian"
+			if period == "month" {
+				per = "bulanan"
+			}
+			if s.QuotaSource == "" || source == "custom" {
+				s.QuotaSource = source
+			}
+			for _, m := range []struct {
+				name      string
+				used, lim float64
+			}{{"token", float64(tu), float64(tl)}, {"request", float64(ru), float64(rl)}, {"biaya", cu, cl}} {
+				if m.lim > 0 {
+					if pct := min(100, m.used/m.lim*100); pct >= s.QuotaPct {
+						s.QuotaPct, s.QuotaLabel = pct, m.name+" "+per
+					}
+				}
+			}
+		}
+		rows.Close()
+	}
+	if rows, err := a.st.DB.Query(`SELECT id FROM users WHERE log_content = 1`); err == nil {
+		for rows.Next() {
+			var id int64
+			if rows.Scan(&id) == nil {
+				get(id).LogContent = true
+			}
+		}
+		rows.Close()
+	}
+	return out
 }
 
 // canManageUser RBAC: admin hanya boleh kelola non-admin (FR-4.1).

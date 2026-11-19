@@ -116,3 +116,43 @@ func TestAdminDashboardAndMeActivity(t *testing.T) {
 		t.Errorf("member access admin dashboard = %d", w.Code)
 	}
 }
+
+func TestListUsersSummary(t *testing.T) {
+	app, st, _ := appTestEnv(t)
+	dev, _ := st.GetUserByEmail("dev@test")
+	st.PutQuota("user", dev.ID, "day", 100, 0, 0)
+	st.RecordQuotaUsage("user", dev.ID, 40, 0)
+	st.DB.Exec(`INSERT INTO request_logs (ts, user_id, requested_model, status) VALUES (?,?,?,?)`, "2026-11-01T10:00:00Z", dev.ID, "m", 200)
+	st.SetUserLogContent(dev.ID, true)
+	st.CreateUser("admin2@test", "Kuat-2026-Pass", "admin")
+
+	cookie, _ := loginAs(app, t, "admin2@test", "Kuat-2026-Pass")
+	w := dashReq(app, "GET", "/api/admin/users", nil, cookie, "")
+	var res struct {
+		Users []struct {
+			User      struct{ Email string }
+			CanManage bool `json:"can_manage"`
+			Summary   struct {
+				KeysActive  int     `json:"keys_active"`
+				LastActive  string  `json:"last_active"`
+				QuotaPct    float64 `json:"quota_pct"`
+				QuotaLabel  string  `json:"quota_label"`
+				QuotaSource string  `json:"quota_source"`
+				LogContent  bool    `json:"log_content"`
+			}
+		}
+	}
+	json.Unmarshal(w.Body.Bytes(), &res)
+	got := map[string]int{}
+	for i, u := range res.Users {
+		got[u.User.Email] = i
+	}
+	d := res.Users[got["dev@test"]]
+	if d.Summary.KeysActive != 1 || d.Summary.QuotaPct != 40 || d.Summary.QuotaLabel != "token harian" ||
+		d.Summary.QuotaSource != "custom" || d.Summary.LastActive == "" || !d.Summary.LogContent || !d.CanManage {
+		t.Errorf("dev summary = %+v can=%v", d.Summary, d.CanManage)
+	}
+	if res.Users[got["admin@test"]].CanManage {
+		t.Error("admin must not manage super_admin")
+	}
+}

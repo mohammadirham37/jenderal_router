@@ -1,0 +1,1 @@
+import{G as e,at as t,ot as n}from"../chunks/B03BwRiT.js";import{t as r}from"../chunks/C_Cbkh_T.js";function i(i,a){n(a,!0),e(()=>{r(`/dashboard`,{replace:!0})}),t()}export{i as component};
