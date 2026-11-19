@@ -59,6 +59,16 @@
 	type App = { id: string; label: string; hint: string; lang: string; steps: string[]; code: (k: string) => string };
 	const APPS: App[] = [
 		{
+			id: 'jenderalcode', label: 'JenderalCode', hint: 'agen coding desktop — gratis', lang: 'text',
+			steps: [
+				'Unduh & pasang JenderalCode dari <a href="https://code.jenderalcorp.com" target="_blank" rel="noopener">code.jenderalcorp.com</a> (macOS, Windows, Linux)',
+				'Buka menu <b>Providers</b> → <b>Add provider</b>, lalu pilih preset <b>Custom OpenAI-compatible</b>',
+				'Isi <b>Name</b>, <b>Base URL</b>, dan <b>API key</b> persis seperti di bawah, lalu klik <b>Save provider</b>',
+				'Buka folder proyek Anda, pilih model dari provider <b>JenderalRouter</b>, lalu minta agen mengerjakan tugas coding'
+			],
+			code: (k) => `Preset   : Custom OpenAI-compatible\nName     : JenderalRouter\nBase URL : ${baseURL}\nAPI key  : ${k}\nModel    : ${modelId}`
+		},
+		{
 			id: 'python', label: 'Python', hint: 'skrip & notebook', lang: 'python',
 			steps: ['Pasang library: <code>pip install openai</code>', 'Simpan kode di bawah sebagai <code>tes.py</code>', 'Jalankan: <code>python tes.py</code>'],
 			code: (k) => `from openai import OpenAI\n\nclient = OpenAI(\n    base_url="${baseURL}",\n    api_key="${k}",\n)\n\njawaban = client.chat.completions.create(\n    model="${modelId}",\n    messages=[{"role": "user", "content": "Halo, perkenalkan dirimu"}],\n)\nprint(jawaban.choices[0].message.content)`
@@ -121,7 +131,7 @@
 			code: (k) => `Tipe provider : OpenAI Compatible\nBase URL      : ${baseURL}\nAPI Key       : ${k}\nModel         : ${modelId}`
 		}
 	];
-	let appId = $state('python');
+	let appId = $state('jenderalcode');
 	const app = $derived(APPS.find((a) => a.id === appId)!);
 	const snippet = $derived(app.code(shownKey));
 

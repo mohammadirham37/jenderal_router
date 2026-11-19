@@ -10,6 +10,7 @@
 	import Sparkline from '#lib/components/Sparkline.svelte';
 	import TrafficChart from '#lib/components/TrafficChart.svelte';
 	import QuotaCard from '#lib/components/QuotaCard.svelte';
+	import JenderalCodePromo from '#lib/components/JenderalCodePromo.svelte';
 
 	const isAdmin = $derived(!!app.me && roleAtLeast(app.me.role, 'admin'));
 
@@ -236,6 +237,7 @@
 		<span class="grow"></span>
 		{#if updatedAt}<span class="upd">diperbarui {updatedAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>{/if}
 	</nav>
+	<div class="promo"><JenderalCodePromo variant="strip" dismissKey="jr_jc_admin_dash" /></div>
 
 	{#if !dash}
 		<div class="card"><span class="spinner dark"></span> {t('loading')}…</div>
@@ -471,6 +473,8 @@
 		</button>
 	</nav>
 
+	<div class="promo"><JenderalCodePromo dismissKey="jr_jc_member_dash" guideHref="/usage#panduan" /></div>
+
 	{#if memberLoading}
 		<div class="card"><span class="spinner dark"></span> {t('loading')}…</div>
 	{:else}
@@ -575,6 +579,8 @@
 	.quick a:hover { border-color: var(--accent); transform: translateY(-1px); }
 	.quick a :global(svg) { color: var(--accent); }
 	.upd { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+	.promo { margin-bottom: 14px; }
 
 	/* ---------- peringatan ---------- */
 	.alerts { display: grid; gap: 6px; margin-bottom: 14px; }

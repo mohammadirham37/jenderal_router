@@ -6,6 +6,7 @@
 	import { t, toast } from '#lib/stores.svelte.js';
 	import Stat from '#lib/components/Stat.svelte';
 	import ApiGuide from '#lib/components/ApiGuide.svelte';
+	import JenderalCodePromo from '#lib/components/JenderalCodePromo.svelte';
 
 	const origin = browser ? window.location.origin : '';
 	const baseURL = origin + '/v1';
@@ -177,7 +178,9 @@
 		</div>
 	</div>
 
-	<div class="card" style="margin-top:14px">
+	<div style="margin-top:14px"><JenderalCodePromo guideHref="#panduan" /></div>
+
+	<div class="card" style="margin-top:14px" id="panduan">
 		<h2><Plug size={15} /> Cara menghubungkan aplikasi</h2>
 		<ApiGuide keyPrefix={guideKey?.prefix ?? ''} getKey={guideGetKey} onGenerate={generateKey} {generating} />
 	</div>

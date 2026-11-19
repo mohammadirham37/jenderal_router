@@ -8,6 +8,7 @@
 	import { exportAnswer, exportConversation, detectDocRequest, DOC_SYSTEM, buildDocBlob, docFileName, type ExportFormat, type DocType } from '#lib/exporters.js';
 	import { t, toast } from '#lib/stores.svelte.js';
 	import Modal from '#lib/components/Modal.svelte';
+	import JenderalCodePromo from '#lib/components/JenderalCodePromo.svelte';
 	import {
 		ACCEPT, MAX_ATTACHMENTS, MAX_IMAGES, kindOf, readAttachment, storedAttachments, fmtBytes, kindLabel,
 		type Attachment
@@ -631,6 +632,7 @@
 								</button>
 							{/each}
 						</div>
+						<div class="jc-promo"><JenderalCodePromo variant="strip" dismissKey="jr_jc_chat" /></div>
 					</div>
 				{/if}
 
@@ -900,6 +902,7 @@
 	.welcome { text-align: center; padding: 8vh 0 2vh; animation: rise 420ms cubic-bezier(.2,.7,.2,1); }
 	.welcome h2 { font-size: 24px; letter-spacing: -0.02em; margin: 14px 0 6px; font-weight: 750; }
 	.welcome p { margin: 0 auto 22px; max-width: 460px; font-size: 13.5px; }
+	.jc-promo { max-width: 720px; margin: 18px auto 0; text-align: left; }
 	.orb {
 		width: 48px; height: 48px; margin: 0 auto; border-radius: 16px; display: grid; place-items: center;
 		color: #fff; background: var(--grad-accent);
