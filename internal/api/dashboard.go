@@ -74,6 +74,7 @@ func (a *App) routesDashboard() {
 	a.mux.HandleFunc("GET /api/admin/logs/{id}/content", a.requireSession(a.handleLogContent, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/analytics/summary", a.requireSession(a.handleAnalyticsSummary, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/dashboard", a.requireSession(a.handleAdminDashboard, store.RoleAdmin, false))
+	a.mux.HandleFunc("GET /api/admin/nav-status", a.requireSession(a.handleNavStatus, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/analytics/top-users", a.requireSession(a.handleTopUsers, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/audit", a.requireSession(a.handleListAudit, store.RoleAdmin, false))
 	a.mux.HandleFunc("GET /api/admin/settings", a.requireSession(a.handleGetSettings, store.RoleAdmin, false))

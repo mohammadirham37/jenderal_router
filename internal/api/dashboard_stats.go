@@ -174,3 +174,36 @@ func (a *App) handleMeActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"days": days, "series": series, "total": total})
 }
+
+// handleNavStatus GET /api/admin/nav-status — angka ringan untuk lencana
+// sidebar (dipoll tiap menit): provider bermasalah, error 1 jam terakhir,
+// dan user yang kuotanya ≥90%.
+func (a *App) handleNavStatus(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	hourAgo := now.Add(-time.Hour)
+	lastHour, _ := usage.GetProviderWindows(a.st, hourAgo, now.Add(time.Minute))
+	providers, err := a.st.ListProviders()
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	down, degraded := 0, 0
+	for _, p := range providers {
+		if !p.Enabled {
+			continue
+		}
+		if a.breakers.For(p.ID).IsOpen() {
+			down++
+			continue
+		}
+		if h := lastHour[p.ID]; h != nil && h.Requests >= 3 && float64(h.Errors)/float64(h.Requests) >= 0.5 {
+			degraded++
+		}
+	}
+	hour, _ := usage.GetPeriodTotals(a.st, hourAgo, now.Add(time.Minute))
+	quota, _ := usage.GetQuotaAlerts(a.st, 0.9, 1000)
+	writeJSON(w, 200, map[string]any{
+		"providers_down": down, "providers_degraded": degraded,
+		"errors_hour": hour.Errors, "quota_alerts": len(quota),
+	})
+}

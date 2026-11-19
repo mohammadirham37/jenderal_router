@@ -13,6 +13,7 @@ export const app = $state({
 	me: null as Me | null,
 	csrfReady: false,
 	lang: (typeof localStorage !== 'undefined' && localStorage.getItem('jr_lang')) || 'id',
+	theme: ((typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme')) || 'dark') as 'dark' | 'light',
 	toasts: [] as Toast[]
 });
 
@@ -133,6 +134,7 @@ export function toggleLang() {
 }
 
 export function applyTheme(theme: 'dark' | 'light') {
+	app.theme = theme;
 	localStorage.setItem('jr_theme', theme);
 	document.documentElement.setAttribute('data-theme', theme);
 }

@@ -104,6 +104,14 @@ func TestAdminDashboardAndMeActivity(t *testing.T) {
 	if len(m.Series) != 7 || m.Total.Requests != 6 || m.Total.Chat != 1 || m.Total.API != 5 {
 		t.Errorf("me activity = %d series, total %+v", len(m.Series), m.Total)
 	}
+	w = dashReq(app, "GET", "/api/admin/nav-status", nil, cookie, "")
+	if !strings.Contains(w.Body.String(), `"providers_degraded":1`) || !strings.Contains(w.Body.String(), `"errors_hour":4`) ||
+		!strings.Contains(w.Body.String(), `"quota_alerts":1`) {
+		t.Errorf("nav-status = %s", w.Body.String())
+	}
+	if w := dashReq(app, "GET", "/api/admin/nav-status", nil, devCookie, ""); w.Code != 403 {
+		t.Errorf("member nav-status = %d", w.Code)
+	}
 	if w := dashReq(app, "GET", "/api/admin/dashboard", nil, devCookie, ""); w.Code != 403 {
 		t.Errorf("member access admin dashboard = %d", w.Code)
 	}
